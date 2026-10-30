@@ -1,4 +1,5 @@
 #include "Createmove.h"
+#include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
 
 #include "../Aimbot/Aimbot.h"
 #include "../Backtrack/Backtrack.h"
@@ -60,7 +61,10 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 
 	auto pLocal = H::Entities.GetLocal();
 	if (!pLocal)
+	{
+		F::AutoTrolldier.Reset();
 		return;
+	}
 
 	auto pWeapon = H::Entities.GetWeapon();
 	CUserCmd* pCmd = &I::Input->m_pCommands[nSequenceNum % MULTIPLAYER_BACKUP];
@@ -79,23 +83,32 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	F::AutoVote.Run(pLocal);
 	F::Backtrack.CreateMove(pLocal, pWeapon, pCmd);
 
+	F::AutoTrolldier.UpdateAutomation(pLocal, pWeapon, pCmd);
+	F::AutoTrolldier.Prepare(pLocal, pWeapon, pCmd);
 	F::Ticks.Start(pLocal, pCmd);
 	{
-		F::Aimbot.Run(pLocal, pWeapon, pCmd);
+		if (!F::AutoTrolldier.SuppressCombat())
+			F::Aimbot.Run(pLocal, pWeapon, pCmd);
+		F::AutoTrolldier.AfterAim(pLocal, pWeapon, pCmd);
 	}
 	F::Ticks.End(pLocal, pCmd);
 	{
-		F::FollowBot.Run(pLocal, pCmd);
-		F::NavBotCore.Run(pLocal, pWeapon, pCmd);
-		F::NavEngine.Run(pLocal, pWeapon, pCmd);
-		F::VSHController.RunBoss(pLocal, pCmd);
-		F::ZIController.CreateMove(pLocal, pCmd);
-		F::BotUtils.HandleSmartJump(pLocal, pCmd);
+		if (!F::AutoTrolldier.IsActive(pCmd))
+		{
+			F::FollowBot.Run(pLocal, pCmd);
+			F::NavBotCore.Run(pLocal, pWeapon, pCmd);
+			F::NavEngine.Run(pLocal, pWeapon, pCmd);
+			F::VSHController.RunBoss(pLocal, pCmd);
+			F::ZIController.CreateMove(pLocal, pCmd);
+			F::BotUtils.HandleSmartJump(pLocal, pCmd);
+		}
 		F::CritHack.Run(pLocal, pWeapon, pCmd);
 		F::CritHack.CacheDrawInfo(pLocal);
 		F::NoSpread.Run(pLocal, pWeapon, pCmd);
 		F::Misc.RunPost(pLocal, pCmd);
 		F::Misc.AutoFaNJump(pLocal, pWeapon, pCmd);
+		F::AutoTrolldier.RotateCamera(pLocal, pCmd);
+		F::AutoTrolldier.ApplyMovement(pCmd);
 		F::PacketManip.Run(pLocal, pWeapon, pCmd);
 		F::Ticks.CreateMove(pLocal, pWeapon, pCmd);
 		F::AntiAim.Run(pLocal, pWeapon, pCmd);

@@ -47,6 +47,8 @@
     <ClCompile Include="src\Features\Aimbot\AutoAirblast\AutoAirblast.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoDetonate\AutoDetonate.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoRocketJump\AutoRocketJump.cpp" />
+    <ClCompile Include="src\Features\Aimbot\AutoTrolldier\AutoTrolldier.cpp" />
+    <ClCompile Include="src\Features\ImGui\TextEffects\TextEffects.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoHeal\AutoHeal.cpp" />
     <ClCompile Include="src\Features\Misc\AutoQueue\AutoQueue.cpp" />
     <ClCompile Include="src\Features\Misc\AutoQueue\MvmQueue.cpp" />
@@ -452,6 +454,12 @@
     <ClInclude Include="src\Features\Aimbot\AutoAirblast\AutoAirblast.h" />
     <ClInclude Include="src\Features\Aimbot\AutoDetonate\AutoDetonate.h" />
     <ClInclude Include="src\Features\Aimbot\AutoRocketJump\AutoRocketJump.h" />
+    <ClInclude Include="src\Features\Aimbot\AutoTrolldier\AutoTrolldier.h" />
+    <ClInclude Include="src\Features\Aimbot\AutoTrolldier\Intercept.h" />
+    <ClInclude Include="src\Features\Aimbot\AutoTrolldier\Rotation.h" />
+    <ClInclude Include="src\Features\Aimbot\AutoTrolldier\Automation.h" />
+    <ClInclude Include="src\Features\ImGui\TextEffects\TextEffects.h" />
+    <ClInclude Include="src\Features\ImGui\TextEffects\GlyphMask.h" />
     <ClInclude Include="src\Features\Aimbot\AutoHeal\AutoHeal.h" />
     <ClInclude Include="src\Features\Misc\AutoQueue\AutoQueue.h" />
     <ClInclude Include="src\Features\Misc\AutoQueue\MvmQueue.h" />

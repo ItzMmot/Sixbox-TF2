@@ -1,4 +1,5 @@
 #include "Aimbot.h"
+#include "AutoTrolldier/AutoTrolldier.h"
 
 #include "AimbotHitscan/AimbotHitscan.h"
 #include "AimbotProjectile/AimbotProjectile.h"
@@ -155,7 +156,8 @@ void CAimbot::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 #endif
 
 	if ((G::Attacking = SDK::IsAttacking(pLocal, pWeapon, pCmd, true)) == 1 
-		&& m_eRanType == EWeaponType::UNKNOWN 
+		&& m_eRanType == EWeaponType::UNKNOWN && !F::AutoTrolldier.IsActive(pCmd)
+		&& !F::AutoTrolldier.HasCommittedStrike(pLocal, pWeapon, pCmd)
 		&& !F::AntiCheatCompatibility.Active() 
 		&& pLocal->IsAlive() && !pLocal->IsAGhost() && !pLocal->InCond(TF_COND_HALLOWEEN_KART))
 	{

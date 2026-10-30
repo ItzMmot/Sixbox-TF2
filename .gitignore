@@ -380,3 +380,6 @@ Unibox/src/Features/Misc/ProfileStalker/ProfileStalker.cpp
 Unibox/src/Features/Misc/ProfileStalker/ProfileStalker.h
 # menu ui pack
 MenuUI.zip
+
+# Temporary local implementation plan
+/TODO.local.md

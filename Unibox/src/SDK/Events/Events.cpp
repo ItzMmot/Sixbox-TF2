@@ -2,6 +2,7 @@
 
 #include "../../Core/Core.h"
 #include "../../Features/Aimbot/AutoHeal/AutoHeal.h"
+#include "../../Features/Aimbot/AutoTrolldier/AutoTrolldier.h"
 #include "../../Features/Backtrack/Backtrack.h"
 #include "../../Features/CheatDetection/CheatDetection.h"
 #include "../../Features/CritHack/CritHack.h"
@@ -60,6 +61,7 @@ void CEventListener::FireGameEvent(IGameEvent* pEvent)
 	F::Output.Event(pEvent, uHash, pLocal);
 	if (I::EngineClient->IsPlayingDemo())
 		return;
+	F::AutoTrolldier.Event(pEvent, uHash);
 
 	F::CritHack.Event(pEvent, uHash, pLocal);
 	F::AutoHeal.Event(pEvent, uHash);

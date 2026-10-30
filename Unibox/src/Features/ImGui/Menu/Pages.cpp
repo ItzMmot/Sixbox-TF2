@@ -815,6 +815,9 @@ static void VisualsMenu()
 		if (Section("Debug##Menu"))
 		{
 			FontPicker();
+			FSlider(Vars::Menu::TextExpansion);
+			FSlider(Vars::Menu::TextGlowStrength);
+			FSlider(Vars::Menu::TextGlowRadius);
 			if (DebugRow("Indicator colors"))
 			{
 				FColorPicker(Vars::Colors::IndicatorGood, FColorPickerEnum::Left);
@@ -1004,6 +1007,28 @@ static void MiscMain()
 		FToggle(AutoCTap);
 		FToggle(AutoFaNJump);
 		FToggle(AutoRevJump);
+
+		Subheader("Auto trolldier");
+		FToggle(AutoTrolldier::Enabled);
+		PushTransparent(!AutoTrolldier::Enabled.Value);
+		{
+			FToggle(AutoTrolldier::AutoMarketGardenerSwap);
+			FToggle(AutoTrolldier::AutoAimbot);
+			FSlider(AutoTrolldier::MaxDistance);
+			FSlider(AutoTrolldier::PredictionTime);
+			FSlider(AutoTrolldier::MaxTargets);
+			FSlider(AutoTrolldier::TraceBudget);
+			FToggle(AutoTrolldier::CancelOnInput);
+			FDropdown(AutoTrolldier::Rotation);
+			PushTransparent(AutoTrolldier::Rotation.Value != AutoTrolldier::RotationEnum::Legit && AutoTrolldier::Rotation.Value != AutoTrolldier::RotationEnum::LegitSilent);
+			FSlider(AutoTrolldier::RotationSpeed);
+			PopTransparent();
+			FToggle(AutoTrolldier::DrawPath);
+			FColorPicker(AutoTrolldier::PathColor);
+			FToggle(AutoTrolldier::PathThroughWalls);
+			FNote("Auto MG swap returns to the launcher after the swing resolves, including an unconfirmed hit. Auto aimbot temporarily enables your bound aim mode and Auto shoot for the strike.");
+		}
+		PopTransparent();
 
 		Subheader("Control");
 		FToggle(FastStop);

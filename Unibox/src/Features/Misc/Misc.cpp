@@ -1,4 +1,5 @@
 #include "Misc.h"
+#include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
 #include "../Configs/Configs.h"
 #include "AutoItem/AutoItem.h"
 
@@ -61,6 +62,8 @@ void CMisc::RunPre(CTFPlayer* pLocal, CUserCmd* pCmd)
 void CMisc::RunPost(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
 	m_bDuckSpeedActive = false;
+	if (F::AutoTrolldier.IsActive(pCmd))
+		return;
 	AutoCrouchNavbot(pLocal, pCmd);
 
 	if (!pLocal->IsAlive() || pLocal->IsAGhost() || pLocal->m_MoveType() != MOVETYPE_WALK || pLocal->IsSwimming()

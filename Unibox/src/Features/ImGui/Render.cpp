@@ -18,6 +18,7 @@
 #include "../Visuals/Visuals.h"
 #include "../Aimbot/Aimbot.h"
 #include "Overlay/CaptureOverlay.h"
+#include "TextEffects/TextEffects.h"
 
 void CRender::Render(IDirect3DDevice9* pDevice)
 {
@@ -42,7 +43,12 @@ void CRender::Render(IDirect3DDevice9* pDevice)
 		static std::string sStaticFont = Vars::Menu::CustomFont.Value;
 		const bool bFontChanged = sStaticFont != Vars::Menu::CustomFont.Value;
 		sStaticFont = Vars::Menu::CustomFont.Value;
-		if (flNewScale != flOldScale || bFontChanged)
+		const auto textEffects = TextEffects::Settings::Sanitize(Vars::Menu::TextExpansion.Value,
+			Vars::Menu::TextGlowStrength.Value, Vars::Menu::TextGlowRadius.Value);
+		static auto oldTextEffects = textEffects;
+		const bool effectsChanged = oldTextEffects != textEffects;
+		oldTextEffects = textEffects;
+		if (flNewScale != flOldScale || bFontChanged || effectsChanged)
 			Reload();
 	}
 

@@ -6,6 +6,7 @@
 #include "../Features/Visuals/Visuals.h"
 #include "../Features/Visuals/Materials/Materials.h"
 #include "../Features/NavBot/NavRender.h"
+#include "../Features/Aimbot/AutoTrolldier/AutoTrolldier.h"
 #include "../Features/Spectate/Spectate.h"
 
 MAKE_SIGNATURE(CViewRender_DrawViewModels, "client.dll", "48 89 5C 24 ? 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 8B FA", 0x0);
@@ -27,6 +28,7 @@ MAKE_HOOK(CClientModeShared_DoPostScreenSpaceEffects, U::Memory.GetVirtual(I::Cl
 		return CALL_ORIGINAL(rcx, pSetup);
 	
 	F::NavRender.RenderWorld();
+	F::AutoTrolldier.RenderWorld();
 	F::Visuals.Triggers(pLocal);
 	F::Visuals.DrawEffects();
 	if (I::EngineVGui->IsGameUIVisible() || !F::Materials.m_bLoaded)

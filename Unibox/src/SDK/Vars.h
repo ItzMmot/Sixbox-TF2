@@ -199,6 +199,9 @@ NAMESPACE_BEGIN(Vars)
 		CVar(IndicatorScale, "Indicator scale", 1.f, NOBIND | SLIDER_MIN | SLIDER_PRECISION | SLIDER_NOAUTOUPDATE, 0.75f, 2.f, 0.25f);
 		CVar(CheapText, "Cheap text", false, NOBIND);
 		CVar(CustomFont, "Custom font", std::string(), NOBIND | NOSAVE | DEBUGVAR);
+		CVar(TextExpansion, "Text expansion", 0.f, VISUAL | NOBIND | DEBUGVAR | SLIDER_CLAMP | SLIDER_PRECISION | SLIDER_NOAUTOUPDATE, 0.f, 2.f, 0.05f, "%gpx");
+		CVar(TextGlowStrength, "Text glow strength", 0.f, VISUAL | NOBIND | DEBUGVAR | SLIDER_CLAMP | SLIDER_NOAUTOUPDATE, 0.f, 200.f, 5.f, "%g%%");
+		CVar(TextGlowRadius, "Text glow radius", 4.f, VISUAL | NOBIND | DEBUGVAR | SLIDER_CLAMP | SLIDER_PRECISION | SLIDER_NOAUTOUPDATE, 0.f, 12.f, 0.25f, "%gpx");
 
 		NAMESPACE_BEGIN(Theme)
 			CVar(Accent, "Accent color", Color_t(190, 44, 58, 255), VISUAL);
@@ -843,6 +846,23 @@ NAMESPACE_BEGIN(Vars)
 				VA_LIST("Off", "Legit", "Strafe", "Strafe silent"),
 				Off, Legit, Strafe, StrafeSilent);
 			CVar(AutoRocketJump, "Auto rocket jump", false);
+			NAMESPACE_BEGIN(AutoTrolldier)
+				CVar(Enabled, VA_LIST("Auto trolldier", "Auto trolldier enabled"), false);
+				CVar(AutoMarketGardenerSwap, "Auto Market Gardener swap", false);
+				CVar(AutoAimbot, "Auto aimbot", false);
+				CVar(MaxDistance, "Target distance", 1400.f, SLIDER_CLAMP, 128.f, 3000.f, 50.f, "%g HU");
+				CVar(PredictionTime, "Flight prediction", 0.9f, SLIDER_CLAMP | SLIDER_PRECISION, 0.25f, 5.f, 0.05f, "%gs");
+				CVar(MaxTargets, "Intercept candidates", 4, SLIDER_CLAMP, 1, 4, 1);
+				CVar(TraceBudget, "Flight trace budget", 2048, SLIDER_CLAMP, 256, 16384, 256);
+				CVar(CancelOnInput, "Cancel on movement input", false);
+				CVarEnum(Rotation, "Flight rotations", 0, NONE, nullptr,
+					VA_LIST("Off", "Plain", "Silent", "Legit", "Legit silent"),
+					Off, Plain, Silent, Legit, LegitSilent);
+				CVar(RotationSpeed, "Flight rotation speed", 25.f, SLIDER_CLAMP, 1.f, 120.f, 1.f);
+				CVar(DrawPath, "Draw strafe path", true, VISUAL);
+				CVar(PathColor, "Strafe path color", Color_t(99, 102, 241, 220), VISUAL);
+				CVar(PathThroughWalls, "Strafe path through walls", false, VISUAL);
+			NAMESPACE_END(AutoTrolldier)
 			CVar(AutoCTap, "Auto ctap", false);
 			CVar(AutoFaNJump, "Auto FaN jump", false);
 			CVar(AutoRevJump, "Auto rev jump", false);

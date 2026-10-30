@@ -1,4 +1,5 @@
 #include "Ticks.h"
+#include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
 
 #include "../PacketManip/AntiAim/AntiAim.h"
 #include "../EnginePrediction/EnginePrediction.h"
@@ -66,6 +67,8 @@ void CTicks::Warp()
 
 void CTicks::Doubletap(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
+	if (F::AutoTrolldier.IsActive(pCmd))
+		return;
 	if (!m_bGoalReached)
 		return;
 

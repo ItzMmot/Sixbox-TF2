@@ -4,6 +4,8 @@
 #include "Fonts/Alata/Alata.h"
 #include "Fonts/CascadiaMono/CascadiaMono.h"
 #include "Fonts/MaterialDesign/MaterialIcons.h"
+#include "TextEffects/TextEffects.h"
+#include "../../SDK/Vars.h"
 #include <algorithm>
 #include <windows.h>
 
@@ -79,6 +81,12 @@ void CMenuTheme::LoadColors(const ThemeInput_t& tInput)
 	pColors[ImGuiCol_WindowBg] = {};
 }
 
+static void ConfigureTextEffects(ImFontAtlas* atlas, ImFontConfig& config)
+{
+	TextEffects::ConfigureFont(atlas, config, TextEffects::Settings::Sanitize(
+		Vars::Menu::TextExpansion.Value, Vars::Menu::TextGlowStrength.Value, Vars::Menu::TextGlowRadius.Value));
+}
+
 static void MergeFallback(ImFontAtlas* pAtlas, float flSize)
 {
 	static const char* s_vFallbacks[] = { R"(C:\Windows\Fonts\segoeui.ttf)", R"(C:\Windows\Fonts\arial.ttf)", R"(C:\Windows\Fonts\tahoma.ttf)" };
@@ -91,6 +99,7 @@ static void MergeFallback(ImFontAtlas* pAtlas, float flSize)
 		tConfig.MergeMode = true;
 		tConfig.OversampleH = 2;
 		tConfig.Flags |= ImFontFlags_NoLoadError;
+		ConfigureTextEffects(pAtlas, tConfig);
 		pAtlas->AddFontFromFileTTF(sPath, flSize, &tConfig);
 		return;
 	}
@@ -116,6 +125,7 @@ static ImFont* AddAlata(ImFontAtlas* pAtlas, float flSize)
 	ImFontConfig tConfig;
 	tConfig.OversampleH = 2;
 	tConfig.FontDataOwnedByAtlas = false;
+	ConfigureTextEffects(pAtlas, tConfig);
 	ImFont* pFont = pAtlas->AddFontFromMemoryTTF(const_cast<unsigned int*>(Alata_data), int(Alata_size), flSize, &tConfig);
 	MergeFallback(pAtlas, flSize);
 	RemapCapitals(pFont);
@@ -131,6 +141,7 @@ static ImFont* AddCustom(ImFontAtlas* pAtlas, const std::string& sPath, float fl
 	ImFontConfig tConfig;
 	tConfig.OversampleH = 2;
 	tConfig.Flags |= ImFontFlags_NoLoadError;
+	ConfigureTextEffects(pAtlas, tConfig);
 	ImFont* pFont = pAtlas->AddFontFromFileTTF(sPath.c_str(), flSize, &tConfig);
 	if (pFont)
 		MergeFallback(pAtlas, flSize);
@@ -156,6 +167,7 @@ void CMenuTheme::LoadFonts(ImFontAtlas* pAtlas, float flScale, const std::string
 
 	ImFontConfig tMonoConfig;
 	tMonoConfig.OversampleH = 2;
+	ConfigureTextEffects(pAtlas, tMonoConfig);
 	FontMono = pAtlas->AddFontFromMemoryCompressedTTF(CascadiaMono_compressed_data, CascadiaMono_compressed_size, 15.f * flScale, &tMonoConfig);
 
 	ImFontConfig tIconConfig;
