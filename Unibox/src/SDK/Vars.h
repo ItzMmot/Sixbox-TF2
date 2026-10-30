@@ -846,6 +846,8 @@ NAMESPACE_BEGIN(Vars)
 				VA_LIST("Off", "Legit", "Strafe", "Strafe silent"),
 				Off, Legit, Strafe, StrafeSilent);
 			CVar(AutoRocketJump, "Auto rocket jump", false);
+			CVarEnum(AutoRocketJumpMode, "Rocket jump mode", 0, NONE, nullptr,
+				VA_LIST("Diagonal", "Vertical", "Horizontal"), Diagonal, Vertical, Horizontal);
 			CVar(AutoRocketJumpWalls, "Wall rocket jumps", false);
 			CVar(AutoRocketJumpWallDistance, "Wall search distance", 112.f, SLIDER_CLAMP, 32.f, 160.f, 4.f, "%g HU");
 			NAMESPACE_BEGIN(AutoTrolldier)

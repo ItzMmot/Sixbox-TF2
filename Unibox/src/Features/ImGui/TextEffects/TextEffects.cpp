@@ -10,13 +10,15 @@ namespace TextEffects
         const ImFontLoader* baseLoader = nullptr;
         ImFontLoader effectLoader;
         Workspace workspace;
+        // FreeType owns bits 0..9. Keep our 20-bit mask settings above them.
+        constexpr unsigned NativeFlagBits = 10, NativeFlagMask = (1u << NativeFlagBits) - 1;
 
         bool LoadGlyph(ImFontAtlas* atlas, ImFontConfig* src, ImFontBaked* baked, void* userData,
             ImWchar codepoint, ImFontGlyph* glyph, float* advance)
         {
             if (!baseLoader->FontBakedLoadGlyph(atlas, src, baked, userData, codepoint, glyph, advance)) return false;
             if (!glyph || !glyph->Visible || glyph->Colored || glyph->PackId == ImFontAtlasRectId_Invalid) return true;
-            const auto settings = Settings::Unpack(src->FontLoaderFlags);
+            const auto settings = Settings::Unpack(src->FontLoaderFlags >> NativeFlagBits);
             if (!settings.Active()) return true;
             const auto oldId = glyph->PackId;
             const auto old = *ImFontAtlasPackGetRect(atlas, oldId);
@@ -59,18 +61,23 @@ namespace TextEffects
         settings = Settings::Sanitize(settings.expansion, settings.strength, settings.radius);
         if (!settings.Active()) return;
         if (!atlas->Builder) ImFontAtlasBuildInit(atlas);
-        // This adapter uses the project's bundled stb loader. Other backends
-        // keep their normal flags and rendering rather than interpreting ours.
-        if (!atlas->FontLoader || std::string_view(atlas->FontLoader->Name).find("stb") == std::string_view::npos) return;
+        if (!atlas->FontLoader) return;
+        const std::string_view name(atlas->FontLoader->Name);
+        if (name.find("stb") == std::string_view::npos && name.find("FreeType") == std::string_view::npos) return;
+        if (baseLoader && baseLoader != atlas->FontLoader) return;
         if (!baseLoader)
         {
             baseLoader = atlas->FontLoader;
             effectLoader = *baseLoader;
             effectLoader.Name = "Unibox text effects";
+            // Atlas initialization/shutdown belongs to the native loader.
+            // Per-font adapters must not initialize the FreeType library again.
+            effectLoader.LoaderInit = nullptr;
+            effectLoader.LoaderShutdown = nullptr;
             effectLoader.FontBakedLoadGlyph = LoadGlyph;
         }
         config.FontLoader = &effectLoader;
-        config.FontLoaderFlags = settings.Pack();
+        config.FontLoaderFlags = (config.FontLoaderFlags & NativeFlagMask) | (settings.Pack() << NativeFlagBits);
     }
 }
 #endif

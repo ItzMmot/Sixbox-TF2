@@ -4,6 +4,9 @@
 #include <cassert>
 #include <cstdio>
 #include <limits>
+#ifdef IMGUI_ENABLE_FREETYPE
+#include <imgui_freetype.h>
+#endif
 
 using namespace TextEffects;
 static Workspace scratch;
@@ -15,9 +18,18 @@ static Metrics Bake(const char* path, Settings effects, ImTextureFormat format, 
     atlas.TexDesiredFormat = format;
     ImFontConfig config;
     config.OversampleH = 2;
+#ifdef IMGUI_ENABLE_FREETYPE
+    config.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LightHinting;
+#endif
     ConfigureFont(&atlas, config, effects);
+#ifdef IMGUI_ENABLE_FREETYPE
+    assert((config.FontLoaderFlags & 1023u) == ImGuiFreeTypeLoaderFlags_LightHinting);
+#endif
     ImFont* font = atlas.AddFontFromFileTTF(path, 18.f, &config);
     assert(font && atlas.Build());
+#ifdef IMGUI_ENABLE_FREETYPE
+    assert(atlas.FontLoader == ImGuiFreeType::GetFontLoader());
+#endif
     auto* baked = font->GetFontBaked(18.f);
     auto* glyph = baked->FindGlyph('M');
     assert(glyph && glyph->Visible);

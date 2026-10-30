@@ -1004,6 +1004,9 @@ static void MiscMain()
 		FToggle(AutoJumpbug);
 		FToggle(BreakJump);
 		FToggle(AutoRocketJump);
+		PushTransparent(!AutoRocketJump.Value);
+		FDropdown(AutoRocketJumpMode);
+		PopTransparent();
 		FToggle(AutoRocketJumpWalls);
 		PushTransparent(!AutoRocketJumpWalls.Value);
 		FSlider(AutoRocketJumpWallDistance);

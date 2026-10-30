@@ -7,6 +7,38 @@
 int main()
 {
     using namespace RocketJump;
+    // Nearby walls must never override a valid floor, including a floor plan
+    // that is still waiting for the second grounded command before firing.
+    int floorCalls = 0, wallCalls = 0;
+    bool floorValid = true, wallValid = true;
+    const auto choose = [&] {
+        return SelectSurface([&] { ++floorCalls; return floorValid; }, [&] { ++wallCalls; return wallValid; });
+    };
+    assert(choose() == Surface::Floor && floorCalls == 1 && wallCalls == 0);
+    floorValid = false;
+    assert(choose() == Surface::Wall && floorCalls == 2 && wallCalls == 1);
+    wallValid = false;
+    assert(choose() == Surface::None && floorCalls == 3 && wallCalls == 2);
+    floorValid = wallValid = true;
+    assert(choose() == Surface::Floor && wallCalls == 2); // new landing: floor wins again
+    assert(FloorNormal(0.f, 0.f, 1.f));
+    assert(FloorNormal(.6f, 0.f, .8f)); // walkable slope
+    assert(!FloorNormal(1.f, 0.f, 0.f));
+    assert(!FloorNormal(0.f, 0.f, -1.f));
+    assert(GetMode(-1) == Mode::Diagonal && GetMode(3) == Mode::Diagonal);
+    assert(GetMode(1) == Mode::Vertical && GetMode(2) == Mode::Horizontal);
+    const auto vertical = [](float x, float z, float distance) { return BoostScore(Mode::Vertical, x, 0.f, z, distance, 109.f, 1.f, 0.f); };
+    const auto horizontal = [](float x, float z, float distance) { return BoostScore(Mode::Horizontal, x, 0.f, z, distance, 109.f, 1.f, 0.f); };
+    assert(vertical(0.f, 41.f, 0.f) > vertical(17.f, 41.f, 0.f));
+    assert(vertical(17.f, 41.f, 0.f) > vertical(64.f, 41.f, 40.f));
+    assert(horizontal(64.f, 41.f, 40.f) > horizontal(17.f, 41.f, 0.f));
+    assert(horizontal(64.f, 41.f, 40.f) > horizontal(112.f, 41.f, 88.f)); // distance falloff matters
+    assert(horizontal(0.f, 41.f, 0.f) < 0.f); // a vertical launch gives no forward impulse
+    assert(horizontal(-64.f, 41.f, 40.f) < 0.f); // reject backwards boosts
+    assert(BoostScore(Mode::Horizontal, 0.f, 64.f, 41.f, 40.f, 109.f, 0.f, 1.f) > 0.f); // strafe/right
+    assert(vertical(0.f, -10.f, 0.f) < 0.f); // no downward push for Vertical
+    assert(vertical(0.f, 41.f, 110.f) < 0.f);
+    assert(vertical(std::numeric_limits<float>::quiet_NaN(), 41.f, 0.f) < 0.f);
     ReloadGate reload;
     // A loaded launcher interrupts reload, respects the restored fire cooldown,
     // and only releases the jump sequence when an attack can actually shoot.
@@ -54,5 +86,5 @@ int main()
     assert(!ImpactTicks(10.f, 0.f, .015f));
     assert(!ImpactTicks(10.f, 1100.f, 0.f));
     assert(!ImpactTicks(-1.f, 1100.f, .015f));
-    std::cout << "Auto rocket jump: reload and trajectory regression tests passed\n";
+    std::cout << "Auto rocket jump: floor priority, boost modes, reload and trajectory tests passed\n";
 }

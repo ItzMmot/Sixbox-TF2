@@ -1,0 +1,104 @@
+name: Release FreeType AVX2
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to release (for example v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-freetype-avx2-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_NAME: Sixboxx64ReleaseFreetypeAVX2
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release tag
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v[0-9][0-9A-Za-z._+-]*$') {
+            throw 'Use a version tag such as v1.0.0 or v1.0.0-rc.1.'
+          }
+          $tagCommit = git rev-parse "refs/tags/$env:RELEASE_TAG^{commit}"
+          if ($LASTEXITCODE -ne 0) { throw 'Release tag does not exist.' }
+          if ($tagCommit -ne (git rev-parse HEAD)) { throw 'Checkout does not match the release tag.' }
+
+      - name: Check out matching ImGui FreeType backend
+        uses: actions/checkout@v7
+        with:
+          repository: ocornut/imgui
+          ref: v1.92.7
+          path: .builds/release/imgui
+          sparse-checkout: |
+            misc/freetype
+            imgui.h
+            LICENSE.txt
+          persist-credentials: false
+
+      - name: Check out FreeType
+        uses: actions/checkout@v7
+        with:
+          repository: freetype/freetype
+          ref: VER-2-14-3
+          path: .builds/release/freetype
+          persist-credentials: false
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
+
+      - name: Restore Boost
+        run: |
+          nuget restore Unibox.sln -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
+
+      - name: Build FreeType and AVX2 DLL
+        run: ./.github/scripts/build-release-freetype.ps1
+
+      - name: Save release bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: Sixbox-FreeType-AVX2-${{ env.RELEASE_TAG }}
+          path: output/release/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $assets = @(Get-ChildItem output/release -File | ForEach-Object FullName)
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG @assets --clobber
+          } else {
+            $options = @('--verify-tag', '--title', "Sixbox TF2 $env:RELEASE_TAG (FreeType AVX2)", '--generate-notes')
+            if ($env:RELEASE_TAG -match '-') { $options += '--prerelease' }
+            gh release create $env:RELEASE_TAG @assets @options
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

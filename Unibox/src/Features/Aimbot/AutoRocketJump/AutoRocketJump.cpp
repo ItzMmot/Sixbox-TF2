@@ -18,7 +18,7 @@ void CAutoRocketJump::Reset()
 {
 	m_iFrame = -1;
 	m_iDelay = m_iChoke = 0;
-	m_bRunning = m_bReloadWaiting = m_bWallJump = m_bLastGrounded = false;
+	m_bRunning = m_bReloadWaiting = m_bDuckAfterLaunch = m_bLastGrounded = false;
 	m_owner.Term(); m_weapon.Term();
 	m_reload.Reset();
 }
@@ -29,7 +29,13 @@ void CAutoRocketJump::Prepare(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 	if (!ShouldRun(pLocal, pWeapon, pCmd)) { Reset(); return; }
 	if (m_owner.Get() != pLocal || m_weapon.Get() != pWeapon) Reset();
 	m_owner.Set(pLocal); m_weapon.Set(pWeapon);
-	if (m_iFrame != -1) return;
+	if (m_iFrame != -1)
+	{
+		pCmd->buttons &= ~IN_JUMP;
+		return;
+	}
+	if (Vars::Misc::Movement::AutoRocketJump.Value && pLocal->m_hGroundEntity() && G::CanPrimaryAttack)
+		pCmd->buttons &= ~IN_JUMP; // predict the floor before issuing our timed jump
 
 	const bool wasWaiting = m_bReloadWaiting;
 	m_bReloadWaiting = m_bRunning = false;
@@ -70,62 +76,140 @@ bool CAutoRocketJump::ShouldRun(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUser
 	return true;
 }
 
-bool CAutoRocketJump::SetAngles(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
+namespace
 {
-	m_vAngles = pCmd->viewangles;
-	if (!Vars::Misc::Movement::AutoRocketJump.Value)
-		return true;
+	Vec3 JumpWish(CTFPlayer* player, CUserCmd* cmd, bool preserveDiagonal)
+	{
+		const Vec3 input = { cmd->forwardmove, cmd->sidemove, 0.f };
+		if (!preserveDiagonal && input.IsZero() && player->m_vecVelocity().Length2DSqr() > 1.f)
+			return player->m_vecVelocity().Normalized2D();
+		const float yaw = input.IsZero() ? cmd->viewangles.y : cmd->viewangles.y - Math::VectorAngles(input).y;
+		Vec3 wish; Math::AngleVectors({ 0.f, yaw, 0.f }, &wish);
+		return wish;
+	}
+}
 
-	ProjectileInfo tProjInfo = {};
-	if (!F::ProjSim.GetInfo(pLocal, pWeapon, {}, tProjInfo, ProjSimEnum::NoRandomAngles)
-		|| !F::ProjSim.Initialize(tProjInfo, false))
+bool CAutoRocketJump::RateBlast(CTFPlayer* pLocal, const CGameTrace& impact, const Vec3& origin,
+	const Vec3& mins, const Vec3& maxs, const Vec3& view, const Vec3& wish, float& score)
+{
+	const Vec3 blast = impact.endpos + impact.plane.normal;
+	const Vec3 nearest = origin + Vec3(std::clamp(blast.x - origin.x, mins.x, maxs.x),
+		std::clamp(blast.y - origin.y, mins.y, maxs.y), std::clamp(blast.z - origin.z, mins.z, maxs.z));
+	const float distanceSqr = blast.DistToSqr(nearest);
+	const float radius = TF_ROCKET_RADIUS_FOR_RJS;
+	const float safeRadius = radius - 12.f;
+	if (!std::isfinite(distanceSqr) || distanceSqr >= safeRadius * safeRadius
+		|| !SDK::VisPosWorld(pLocal, pLocal, blast, origin + view, MASK_SHOT))
 		return false;
+	// TF2's self-push direction uses the victim's center and a 10 HU bias.
+	// Directed modes crouch after launch: use the expected crouched center.
+	Vec3 forceMaxs = maxs;
+	const auto mode = Vars::Misc::Movement::AutoRocketJump.Value
+		? RocketJump::GetMode(Vars::Misc::Movement::AutoRocketJumpMode.Value) : RocketJump::Mode::Diagonal;
+	if (mode != RocketJump::Mode::Diagonal)
+		forceMaxs.z = std::min(forceMaxs.z, I::GameMovement->GetPlayerMaxs(true).z * pLocal->m_flModelScale());
+	const Vec3 delta = origin + (mins + forceMaxs) * .5f + Vec3(0.f, 0.f, 10.f) - blast;
+	score = RocketJump::BoostScore(mode, delta.x, delta.y, delta.z, std::sqrt(distanceSqr), radius, wish.x, wish.y);
+	return std::isfinite(score) && score > 0.f;
+}
 
-	Vec3 vOrigin = pLocal->m_vecOrigin();
-	Vec3 vLocalPos = pLocal->GetShootPos();
-	Vec3 vOffset = tProjInfo.m_vPos - vLocalPos; vOffset.x = 0; //vOffset.y *= -1;
-
-	Vec3 vPoint;
-	if (pLocal->IsOnGround())
+bool CAutoRocketJump::FindFloorJump(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd, int& iImpact)
+{
+	const bool automated = Vars::Misc::Movement::AutoRocketJump.Value;
+	const auto mode = automated ? RocketJump::GetMode(Vars::Misc::Movement::AutoRocketJumpMode.Value) : RocketJump::Mode::Diagonal;
+	const bool diagonal = mode == RocketJump::Mode::Diagonal;
+	const bool grounded = bool(pLocal->m_hGroundEntity());
+	const Vec3 original = pLocal->m_vecOrigin();
+	const Vec3 wish = JumpWish(pLocal, pCmd, diagonal);
+	// Reuse a single native movement prediction for every candidate. Snapshots and
+	// candidate arrays have a fixed size; the search allocates no containers.
+	struct Snapshot { Vec3 origin, velocity, mins, maxs, view; bool grounded = false; } states[10] = {};
+	MoveStorage storage;
+	const bool initialized = F::MoveSim.Initialize(pLocal, storage, false);
+	int landing = 0;
+	storage.m_bBunnyHop = false; // the launch sequence owns jump timing
+	if (initialized && !storage.m_bFailed)
 	{
-		float flOffset = sqrtf(2 * powf(vOffset.y, 2.f) + powf(vOffset.z, 2.f));
-		Vec3 vWishVel = { pCmd->forwardmove, pCmd->sidemove, 0.f }, vDir;
-		if (vWishVel.IsZero())
-			vDir = { 0.f, m_vAngles.y, 0.f };
-		else
+		for (int n = 1; n < 10; ++n)
 		{
-			Vec3 vWishAng = Math::VectorAngles(vWishVel);
-			vDir = { 0.f, m_vAngles.y - vWishAng.y, 0.f };
+			F::MoveSim.RunTick(storage, false);
+			if (storage.m_bFailed) break;
+			states[n] = { storage.m_MoveData.m_vecAbsOrigin, storage.m_MoveData.m_vecVelocity,
+				pLocal->m_vecMins(), pLocal->m_vecMaxs(), pLocal->m_vecViewOffset(), pLocal->IsOnGround() && !pLocal->IsSwimming() };
+			if (!landing && states[n].grounded) landing = n;
 		}
-		Vec3 vForward; Math::AngleVectors(vDir, &vForward);
-		vPoint = pLocal->m_vecOrigin() - vForward * flOffset;
 	}
-	else
+	F::MoveSim.Restore(storage);
+	if (!initialized || storage.m_bFailed || (!landing && diagonal)) return false;
+	if (!landing) landing = 1; // directed airborne shots may splash the floor before landing
+
+	ProjectileInfo initial = {};
+	if (!F::ProjSim.GetInfo(pLocal, pWeapon, {}, initial, ProjSimEnum::NoRandomAngles)) return false;
+	const Vec3 muzzleOffset = initial.m_vPos - pLocal->GetShootPos();
+	const float legacyOffset = std::sqrt(2.f * muzzleOffset.y * muzzleOffset.y + muzzleOffset.z * muzzleOffset.z);
+	const float offsets[] = { 0.f, 8.f, 12.f, 16.f, 24.f, 32.f, 40.f, 48.f, 56.f, 64.f, 72.f, 80.f, 88.f, 96.f, 112.f };
+	const int count = diagonal || !automated ? 1 : int(std::size(offsets));
+	const int skip = std::clamp(grounded ? Vars::Misc::Movement::AutoRocketJumpSkipGround.Value : Vars::Misc::Movement::AutoRocketJumpSkipAir.Value, 0, 3);
+	const float interval = I::GlobalVars->interval_per_tick;
+	CTraceFilterWorldAndPropsOnly filter(pLocal);
+	CTraceFilterCollideable rocketFilter(pLocal);
+	Vec3 bestAngles = {};
+	float bestScore = -FLT_MAX;
+	bool found = false;
+	for (int candidate = 0; candidate < count; ++candidate)
 	{
-		//float flOffset = pLocal->m_vecMaxs().x;
-		float flOffset = sqrtf(2 * powf(vOffset.y, 2.f) + powf(vOffset.z, 2.f));
-		bool bShouldReturn = true;
-		MoveStorage tMoveStorage;
-		if (F::MoveSim.Initialize(pLocal, tMoveStorage, false))
+		int lead = landing;
+		for (int refine = 0; refine < (diagonal ? 1 : 3); ++refine)
 		{
-			for (int n = 1; n < 10; n++)
+			m_vAngles = pCmd->viewangles;
+			if (automated)
 			{
-				F::MoveSim.RunTick(tMoveStorage);
-				if (!pLocal->IsOnGround() || pLocal->IsSwimming())
-					continue;
-
-				Vec3 vForward = tMoveStorage.m_MoveData.m_vecVelocity.Normalized2D();
-				vPoint = tMoveStorage.m_MoveData.m_vecAbsOrigin - vForward * flOffset; //- Vec3(0, 0, 20);
-				bShouldReturn = false;
-				break;
+				Vec3 point;
+				if (diagonal)
+					point = grounded ? original - wish * legacyOffset
+						: states[landing].origin - states[landing].velocity.Normalized2D() * legacyOffset;
+				else
+					point = states[lead].origin - wish * offsets[candidate];
+				CGameTrace floor = {};
+				SDK::Trace(point + Vec3(0.f, 0.f, 24.f), point - Vec3(0.f, 0.f, 128.f), MASK_SOLID, &filter, &floor);
+				if (!floor.DidHit() || floor.startsolid || floor.allsolid || (floor.surface.flags & (SURF_SKY | SURF_SKY2D))
+					|| !RocketJump::FloorNormal(floor.plane.normal.x, floor.plane.normal.y, floor.plane.normal.z)
+					|| !AimAtPoint(pLocal, pWeapon, floor.endpos + floor.plane.normal)) break;
 			}
+			ProjectileInfo info = {};
+			if (!F::ProjSim.GetInfo(pLocal, pWeapon, m_vAngles, info, ProjSimEnum::Redirect | ProjSimEnum::InitCheck | ProjSimEnum::NoRandomAngles)
+				|| info.m_flGravity != 0.f || info.m_flVelocity <= 0.f) break;
+			Vec3 forward; Math::AngleVectors(info.m_vAng, &forward);
+			CGameTrace impact = {};
+			SDK::TraceHull(info.m_vPos, info.m_vPos + forward * (info.m_flVelocity * interval * 9.f),
+				-info.m_vHull, info.m_vHull, MASK_SOLID, &rocketFilter, &impact);
+			if (!impact.DidHit() || impact.startsolid || impact.allsolid || (impact.surface.flags & (SURF_SKY | SURF_SKY2D))
+				|| impact.m_pEnt && impact.m_pEnt->IsPlayer()
+				|| !RocketJump::FloorNormal(impact.plane.normal.x, impact.plane.normal.y, impact.plane.normal.z)) break;
+			const int travelTicks = RocketJump::ImpactTicks(impact.endpos.DistTo(info.m_vPos), info.m_flVelocity, interval);
+			const int tick = travelTicks + skip;
+			if (!travelTicks || tick >= 10) break;
+			const auto& state = states[tick];
+			float score;
+			if ((state.grounded || !grounded && !diagonal)
+				&& RateBlast(pLocal, impact, state.origin, state.mins, state.maxs, state.view, wish, score))
+			{
+				if (diagonal || score > bestScore)
+				{
+					bestScore = score; bestAngles = m_vAngles; iImpact = tick; found = true;
+				}
+			}
+			if (tick == lead || diagonal) break;
+			lead = tick;
 		}
-		F::MoveSim.Restore(tMoveStorage);
-		if (bShouldReturn)
-			return false;
 	}
-
-	return AimAtPoint(pLocal, pWeapon, vPoint);
+	if (found)
+	{
+		m_vAngles = bestAngles;
+		if (Vars::Misc::Movement::AutoRocketJumpTimingOffset.Value && iImpact > Vars::Misc::Movement::AutoRocketJumpApplyAbove.Value)
+			iImpact = std::max(iImpact + Vars::Misc::Movement::AutoRocketJumpTimingOffset.Value, 0);
+	}
+	return found;
 }
 
 bool CAutoRocketJump::AimAtPoint(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, const Vec3& vPoint)
@@ -188,15 +272,21 @@ bool CAutoRocketJump::FindWallJump(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CU
 	const float interval = I::GlobalVars->interval_per_tick;
 	const float distance = std::clamp(Vars::Misc::Movement::AutoRocketJumpWallDistance.Value, 32.f, 160.f);
 	const float offsets[] = { 0.f, 30.f, -30.f, 60.f, -60.f, 90.f, -90.f };
+	const auto mode = RocketJump::GetMode(Vars::Misc::Movement::AutoRocketJumpMode.Value);
+	const float center = std::min(pLocal->m_vecMaxs().z, I::GameMovement->GetPlayerMaxs(true).z * pLocal->m_flModelScale()) * .5f + 10.f;
+	const float heights[] = { 12.f, 0.f, -16.f, -32.f, -48.f, -64.f, center, center - 16.f, center + 16.f };
+	const int heightCount = mode == RocketJump::Mode::Diagonal ? 1 : int(std::size(heights));
 	CTraceFilterWorldAndPropsOnly filter(pLocal);
+	CTraceFilterCollideable rocketFilter(pLocal);
 	Vec3 bestAngles = {};
-	float bestScore = FLT_MAX;
+	float bestScore = -FLT_MAX;
 	bool found = false;
 	for (float offset : offsets)
+	for (int height = 0; height < heightCount; ++height)
 	{
 		Vec3 direction; Math::AngleVectors({ 0.f, pCmd->viewangles.y + offset, 0.f }, &direction);
 		CGameTrace wall = {};
-		const Vec3 start = origin + Vec3(0.f, 0.f, 12.f);
+		const Vec3 start = origin + Vec3(0.f, 0.f, heights[height]);
 		SDK::Trace(start, start + direction * distance, MASK_SOLID, &filter, &wall);
 		if (!wall.DidHit() || wall.startsolid || wall.allsolid || (wall.surface.flags & (SURF_SKY | SURF_SKY2D))
 			|| !RocketJump::WallNormal(wall.plane.normal.x, wall.plane.normal.y, wall.plane.normal.z)
@@ -210,8 +300,9 @@ bool CAutoRocketJump::FindWallJump(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CU
 		Vec3 forward; Math::AngleVectors(info.m_vAng, &forward);
 		CGameTrace impact = {};
 		SDK::TraceHull(info.m_vPos, info.m_vPos + forward * (info.m_flVelocity * interval * 10.f),
-			-info.m_vHull, info.m_vHull, MASK_SOLID, &filter, &impact);
+			-info.m_vHull, info.m_vHull, MASK_SOLID, &rocketFilter, &impact);
 		if (!impact.DidHit() || impact.startsolid || impact.allsolid || (impact.surface.flags & (SURF_SKY | SURF_SKY2D))
+			|| impact.m_pEnt && impact.m_pEnt->IsPlayer()
 			|| !RocketJump::WallNormal(impact.plane.normal.x, impact.plane.normal.y, impact.plane.normal.z)
 			|| impact.plane.normal.Dot(wall.plane.normal) < .9f)
 			continue;
@@ -230,15 +321,17 @@ bool CAutoRocketJump::FindWallJump(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CU
 		SDK::TraceHull(origin, future, pLocal->m_vecMins(), pLocal->m_vecMaxs(), pLocal->SolidMask(), &filter, &movement);
 		if (movement.startsolid || movement.allsolid) continue;
 		future = movement.endpos;
-		const Vec3 blast = impact.endpos + impact.plane.normal;
-		const Vec3 mins = future + pLocal->m_vecMins(), maxs = future + pLocal->m_vecMaxs();
-		const Vec3 nearest = { std::clamp(blast.x, mins.x, maxs.x), std::clamp(blast.y, mins.y, maxs.y), std::clamp(blast.z, mins.z, maxs.z) };
-		const float radius = TF_ROCKET_RADIUS_FOR_RJS - 12.f;
-		if (blast.z > future.z + 24.f || blast.DistToSqr(nearest) > radius * radius
-			|| !SDK::VisPosWorld(pLocal, pLocal, blast, future + pLocal->m_vecViewOffset(), MASK_SHOT))
-			continue;
-		const float score = blast.DistToSqr(origin) + offset * offset * .25f;
-		if (score >= bestScore) continue;
+		float score;
+		if (!RateBlast(pLocal, impact, future, pLocal->m_vecMins(), pLocal->m_vecMaxs(),
+			pLocal->m_vecViewOffset(), impact.plane.normal.To2D(), score)) continue;
+		if (mode == RocketJump::Mode::Diagonal)
+		{
+			const Vec3 blast = impact.endpos + impact.plane.normal;
+			if (blast.z > future.z + 24.f) continue;
+			score = -blast.DistToSqr(origin) - offset * offset * .25f;
+		}
+		else score -= offset * offset * .0000001f;
+		if (score <= bestScore) continue;
 		bestScore = score; bestAngles = m_vAngles; iImpact = ticks; found = true;
 	}
 	if (found) m_vAngles = bestAngles;
@@ -258,125 +351,44 @@ void CAutoRocketJump::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* p
 	if (m_bReloadWaiting) return;
 	const bool bLastGrounded = m_bLastGrounded;
 	const bool bCurrGrounded = m_bLastGrounded = bool(pLocal->m_hGroundEntity());
+	const bool bBeggars = pWeapon->m_iItemDefinitionIndex() == Soldier_m_TheBeggarsBazooka;
+	bool pendingFloor = false;
 	if (m_iFrame == -1)
 	{
-		m_bWallJump = false;
-		if (G::CanPrimaryAttack && FindWallJump(pLocal, pWeapon, pCmd, m_iDelay))
+		m_bDuckAfterLaunch = false;
+		const bool full = Vars::Misc::Movement::AutoRocketJump.Value;
+		const auto mode = RocketJump::GetMode(Vars::Misc::Movement::AutoRocketJumpMode.Value);
+		const bool floorEligible = full || (bCurrGrounded
+			? !pLocal->IsDucking() && I::GlobalVars->curtime >= pLocal->m_flDuckTimer() : pLocal->IsDucking());
+		const bool canLaunch = bCurrGrounded && bBeggars ? G::Attacking == 1 : G::CanPrimaryAttack;
+		// A valid floor plan owns this tick even while waiting for stable ground.
+		// Never let a nearby wall steal it during that one-tick stabilization.
+		const auto surface = RocketJump::SelectSurface(
+			[&] { return canLaunch && floorEligible && FindFloorJump(pLocal, pWeapon, pCmd, m_iDelay); },
+			[&] { return G::CanPrimaryAttack && FindWallJump(pLocal, pWeapon, pCmd, m_iDelay); });
+		if (surface == RocketJump::Surface::Floor)
+		{
+			if (!bCurrGrounded || bLastGrounded || bBeggars)
+			{
+				m_iFrame = 0;
+				if (!bCurrGrounded && (!full || mode == RocketJump::Mode::Diagonal)) m_iDelay = 0;
+				m_bDuckAfterLaunch = full && mode != RocketJump::Mode::Diagonal;
+			}
+			else
+			{
+				pendingFloor = true;
+				pCmd->buttons &= ~(IN_JUMP | IN_ATTACK | IN_ATTACK2);
+			}
+		}
+		else if (surface == RocketJump::Surface::Wall)
 		{
 			m_iFrame = 0;
-			m_bWallJump = m_bFull = true;
+			m_bDuckAfterLaunch = true;
+		}
+		if (m_iFrame != -1)
+		{
+			m_bFull = full;
 			m_iChoke = bCurrGrounded ? Vars::Misc::Movement::AutoRocketJumpChokeGrounded.Value : Vars::Misc::Movement::AutoRocketJumpChokeAir.Value;
-		}
-		else
-		{
-			const bool bDuck = pLocal->IsDucking();
-			if (bCurrGrounded ? bDuck || I::GlobalVars->curtime < pLocal->m_flDuckTimer() : !bDuck)
-				return;
-		}
-	}
-
-	bool bValidWeapon = false, bBeggars = pWeapon->m_iItemDefinitionIndex() == Soldier_m_TheBeggarsBazooka;
-	{
-		switch (pWeapon->GetWeaponID())
-		{
-		case TF_WEAPON_ROCKETLAUNCHER:
-		case TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT:
-		case TF_WEAPON_PARTICLE_CANNON: bValidWeapon = true;
-		}
-	}
-
-	if (bValidWeapon && m_iFrame == -1 && (bCurrGrounded && bBeggars ? G::Attacking == 1 : G::CanPrimaryAttack)
-		&& SetAngles(pLocal, pWeapon, pCmd))
-	{
-		bool bWillHit = false;
-		if (Vars::Misc::Movement::AutoRocketJump.Value || Vars::Misc::Movement::AutoCTap.Value)
-		{
-			MoveStorage tMoveStorage;
-			ProjectileInfo tProjInfo = {};
-
-			bool bProjSimSetup = F::ProjSim.GetInfo(pLocal, pWeapon, m_vAngles, tProjInfo, ProjSimEnum::Redirect | ProjSimEnum::InitCheck | ProjSimEnum::NoRandomAngles) && F::ProjSim.Initialize(tProjInfo);
-			bool bMoveSimSetup = F::MoveSim.Initialize(pLocal, tMoveStorage, false); // do move sim after to not mess with proj sim
-			if (bMoveSimSetup && bProjSimSetup)
-			{
-				int iSkip = bCurrGrounded ? Vars::Misc::Movement::AutoRocketJumpSkipGround.Value : Vars::Misc::Movement::AutoRocketJumpSkipAir.Value;
-
-				CGameTrace trace = {};
-				CTraceFilterCollideable filter(pLocal);
-
-				Vec3 vNew = F::ProjSim.GetOrigin();
-				for (int n = 1; n < 10; n++)
-				{
-					F::MoveSim.RunTick(tMoveStorage);
-					if (n <= iSkip)
-						continue;
-
-					F::ProjSim.RunTick(tProjInfo);
-
-					Vec3 vOld = vNew; vNew = F::ProjSim.GetOrigin();
-					SDK::Trace(vOld, vNew, MASK_SOLID, &filter, &trace);
-					if (trace.DidHit())
-					{
-						if (!pLocal->IsOnGround() || pLocal->IsSwimming())
-							break;
-
-						auto fWillHit = [](CTFPlayer* pLocal, const Vec3& vOrigin, const Vec3& vPoint)
-						{
-							const Vec3 vOriginal = pLocal->GetAbsOrigin();
-							pLocal->SetAbsOrigin(vOrigin);
-							Vec3 vPos; pLocal->m_Collision()->CalcNearestPoint(vPoint, &vPos);
-							pLocal->SetAbsOrigin(vOriginal);
-
-							float flRadiusSqr = powf(TF_ROCKET_RADIUS_FOR_RJS, 2);
-							return vPoint.DistToSqr(vPos) < flRadiusSqr && SDK::VisPosWorld(pLocal, pLocal, vPoint, vOrigin + pLocal->m_vecViewOffset(), MASK_SHOT);
-						};
-
-						bWillHit = fWillHit(pLocal, tMoveStorage.m_MoveData.m_vecAbsOrigin, trace.endpos + trace.plane.normal);
-						if (bWillHit)
-						{
-							m_iDelay = n;
-							if (Vars::Misc::Movement::AutoRocketJumpTimingOffset.Value && n > Vars::Misc::Movement::AutoRocketJumpApplyAbove.Value)
-								m_iDelay = std::max(m_iDelay + Vars::Misc::Movement::AutoRocketJumpTimingOffset.Value, 0);
-
-							if (G::CanPrimaryAttack)
-							{
-								SDK::Output("Auto jump", std::format("Ticks to hit: {} ({})", m_iDelay, n).c_str(), { 255, 0, 0 }, Vars::Debug::Logging.Value);
-								if (Vars::Debug::Info.Value)
-								{
-									G::PathStorage.clear(); G::BoxStorage.clear(); G::LineStorage.clear();
-									tProjInfo.m_vPath.push_back(trace.endpos + trace.plane.normal);
-
-									G::PathStorage.emplace_back(tMoveStorage.m_vPath, I::GlobalVars->curtime + 5.f, Color_t(255, 255, 255), Vars::Visuals::Path::StyleEnum::Line);
-									G::BoxStorage.emplace_back(tMoveStorage.m_MoveData.m_vecAbsOrigin, pLocal->m_vecMins(), pLocal->m_vecMaxs(), Vec3(), I::GlobalVars->curtime + 5.f, Color_t(255, 255, 255), Color_t(0, 0, 0, 0), true);
-									G::PathStorage.emplace_back(tProjInfo.m_vPath, I::GlobalVars->curtime + 5.f, Color_t(255, 150, 150), Vars::Visuals::Path::StyleEnum::Line);
-									G::BoxStorage.emplace_back(tProjInfo.m_vPath.back(), Vec3::Get(-1), Vec3::Get(1), Vec3() /*Math::VectorAngles(trace.plane.normal)*/, I::GlobalVars->curtime + 5.f, Color_t(255, 150, 150), Color_t(0, 0, 0, 0), true);
-								}
-							}
-						}
-
-						break;
-					}
-
-					// this will just prevent shooting speedshots when projectile isn't fast enough
-					//if (!bCurrGrounded && !bLastGround && bCurGround)
-					//	break;
-				}
-			}
-			F::MoveSim.Restore(tMoveStorage);
-		}
-
-		if (bWillHit)
-		{
-			if (bCurrGrounded && bCurrGrounded == bLastGrounded)
-				m_iFrame = 0;
-			else if (!bCurrGrounded)
-				m_iFrame = m_iDelay = 0;
-
-			if (m_iFrame != -1)
-			{
-				m_bFull = Vars::Misc::Movement::AutoRocketJump.Value;
-				m_iChoke = bCurrGrounded ? Vars::Misc::Movement::AutoRocketJumpChokeGrounded.Value : Vars::Misc::Movement::AutoRocketJumpChokeAir.Value;
-
-			}
 		}
 	}
 
@@ -398,14 +410,14 @@ void CAutoRocketJump::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* p
 			}
 		}
 
-		if (m_bWallJump && m_iFrame > 1) pCmd->buttons |= IN_DUCK;
+		if (m_bDuckAfterLaunch && m_iFrame > 1) pCmd->buttons |= IN_DUCK;
 
 		if (bCurrGrounded && (m_iFrame - m_iDelay == 0 || !m_iDelay))
 		{
 			pCmd->buttons |= IN_JUMP;
-			// A one-tick wall shot was traced with the current muzzle height.
-			// Defer automated ducking until after that shot, like other wall shots.
-			if (!m_bWallJump || m_iFrame > 1) pCmd->buttons |= IN_DUCK;
+			// Keep the first shot at the muzzle height used by the planner.
+			// Directed boosts crouch on subsequent commands for stronger self-push.
+			if (!m_bDuckAfterLaunch || m_iFrame > 1) pCmd->buttons |= IN_DUCK;
 		}
 
 		if (m_iFrame <= m_iChoke)
@@ -415,5 +427,5 @@ void CAutoRocketJump::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* p
 			m_iFrame = -1;
 	}
 
-	m_bRunning = m_iFrame != -1; // prevent stuff like antiaim messing with timing
+	m_bRunning = m_iFrame != -1 || pendingFloor; // reserve aim/timing while a floor launch stabilizes
 }

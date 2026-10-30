@@ -4,6 +4,42 @@
 
 namespace RocketJump
 {
+    enum class Mode { Diagonal, Vertical, Horizontal };
+    enum class Surface { None, Floor, Wall };
+    // Immediate callbacks are stack-only: no std::function or heap allocation.
+    // A valid floor owns the tick even if its launch awaits stable grounding.
+    template<class Floor, class Wall> Surface SelectSurface(Floor&& floor, Wall&& wall)
+    {
+        if (floor()) return Surface::Floor;
+        return wall() ? Surface::Wall : Surface::None;
+    }
+    inline Mode GetMode(int value)
+    {
+        return value >= 0 && value <= 2 ? static_cast<Mode>(value) : Mode::Diagonal;
+    }
+    inline bool FloorNormal(float x, float y, float z)
+    {
+        return std::isfinite(x) && std::isfinite(y) && std::isfinite(z) && z >= .7f && z <= 1.01f;
+    }
+    // Relative impulse projection, not a promised server-side velocity. TF2 pushes
+    // away from inflictor center - (0,0,10); caller supplies the resulting vector.
+    // Common weapon/server force multipliers cancel when ranking one launcher's shots.
+    inline float BoostScore(Mode mode, float x, float y, float z, float nearestDistance,
+        float radius, float wishX, float wishY)
+    {
+        const float lengthSqr = x*x + y*y + z*z;
+        if (!std::isfinite(lengthSqr) || lengthSqr < .001f || !std::isfinite(nearestDistance)
+            || !std::isfinite(radius) || radius <= 0.f || nearestDistance < 0.f || nearestDistance >= radius)
+            return -1.f;
+        const float falloff = 1.f - .5f * nearestDistance / radius;
+        if (mode == Mode::Vertical) return z > 0.f ? falloff * z / std::sqrt(lengthSqr) : -1.f;
+        const float wishLengthSqr = wishX*wishX + wishY*wishY;
+        if (!std::isfinite(wishLengthSqr) || wishLengthSqr < .001f) return -1.f;
+        const float forward = (x*wishX + y*wishY) / std::sqrt(wishLengthSqr);
+        if (mode == Mode::Horizontal) return forward > 0.f ? falloff * forward / std::sqrt(lengthSqr) : -1.f;
+        return falloff * (std::max(forward, 0.f) + std::max(z, 0.f)) / std::sqrt(2.f * lengthSqr);
+    }
+
     enum class ReloadAction { Idle, WaitingForShell, Interrupt, Ready, TimedOut };
     class ReloadGate
     {

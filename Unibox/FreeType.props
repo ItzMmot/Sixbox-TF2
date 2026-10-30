@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Opt in with /p:UseFreeType=true and the two dependency roots. -->
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>IMGUI_ENABLE_FREETYPE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(FreeTypeRoot)\include\freetype2;$(ImGuiFreeTypeRoot);$(ProjectDir)include\ImGui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>$(FreeTypeRoot)\lib\freetype.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="$(ImGuiFreeTypeRoot)\imgui_freetype.cpp" />
+  </ItemGroup>
+  <Target Name="CheckFreeTypeDependencies" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(FreeTypeRoot)\lib\freetype.lib')" Text="Build and install static FreeType first; set FreeTypeRoot to its install directory." />
+    <Error Condition="!Exists('$(ImGuiFreeTypeRoot)\imgui_freetype.cpp')" Text="Set ImGuiFreeTypeRoot to misc/freetype from the matching Dear ImGui release." />
+  </Target>
+</Project>
