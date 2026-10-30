@@ -1,5 +1,6 @@
 #include "../SDK/SDK.h"
 #include "../Features/Aimbot/AutoTrolldier/AutoTrolldier.h"
+#include "../Features/Aimbot/AutoRocketJump/AutoRocketJump.h"
 
 #include "../Features/Backtrack/Backtrack.h"
 #include "../Features/EnginePrediction/EnginePrediction.h"
@@ -18,6 +19,7 @@ MAKE_HOOK(CHLClient_LevelShutdown, U::Memory.GetVirtual(I::Client, 7), void,
 {
 	DEBUG_RETURN(CHLClient_LevelShutdown, rcx);
 
+	F::AutoRocketJump.Reset();
 	F::AutoTrolldier.Reset();
 	F::Backtrack.Reset();
 	F::Chams.Reset();

@@ -1,5 +1,6 @@
 #include "Createmove.h"
 #include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
+#include "../Aimbot/AutoRocketJump/AutoRocketJump.h"
 
 #include "../Aimbot/Aimbot.h"
 #include "../Backtrack/Backtrack.h"
@@ -62,6 +63,7 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	auto pLocal = H::Entities.GetLocal();
 	if (!pLocal)
 	{
+		F::AutoRocketJump.Reset();
 		F::AutoTrolldier.Reset();
 		return;
 	}
@@ -83,6 +85,7 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	F::AutoVote.Run(pLocal);
 	F::Backtrack.CreateMove(pLocal, pWeapon, pCmd);
 
+	F::AutoRocketJump.Prepare(pLocal, pWeapon, pCmd);
 	F::AutoTrolldier.UpdateAutomation(pLocal, pWeapon, pCmd);
 	F::AutoTrolldier.Prepare(pLocal, pWeapon, pCmd);
 	F::Ticks.Start(pLocal, pCmd);

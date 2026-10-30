@@ -846,6 +846,8 @@ NAMESPACE_BEGIN(Vars)
 				VA_LIST("Off", "Legit", "Strafe", "Strafe silent"),
 				Off, Legit, Strafe, StrafeSilent);
 			CVar(AutoRocketJump, "Auto rocket jump", false);
+			CVar(AutoRocketJumpWalls, "Wall rocket jumps", false);
+			CVar(AutoRocketJumpWallDistance, "Wall search distance", 112.f, SLIDER_CLAMP, 32.f, 160.f, 4.f, "%g HU");
 			NAMESPACE_BEGIN(AutoTrolldier)
 				CVar(Enabled, VA_LIST("Auto trolldier", "Auto trolldier enabled"), false);
 				CVar(AutoMarketGardenerSwap, "Auto Market Gardener swap", false);

@@ -152,7 +152,7 @@ void CAutoTrolldier::UpdateAutomation(CTFPlayer* pLocal, CTFWeaponBase* pWeapon,
 	if (m_swapPhase == SwapPhase::Idle)
 	{
 		if (!airborne) m_swapConsumed = false;
-		if (!airborne || m_swapConsumed || !Launcher(pWeapon) || F::AutoRocketJump.IsRunning()
+		if (!airborne || m_swapConsumed || !Launcher(pWeapon) || F::AutoRocketJump.IsLaunching()
 			|| F::Ticks.m_bShifting || F::Ticks.m_bDoubletap || F::Ticks.m_bWarp || F::Ticks.m_bRecharge
 			|| F::Ticks.m_bAntiWarp || Vars::Doubletap::Warp.Value || !pLocal->CanAttack()
 			|| pLocal->m_MoveType() != MOVETYPE_WALK || pLocal->InCond(TF_COND_PARACHUTE_ACTIVE)

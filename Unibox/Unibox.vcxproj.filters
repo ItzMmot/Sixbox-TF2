@@ -454,6 +454,7 @@
     <ClInclude Include="src\Features\Aimbot\AutoAirblast\AutoAirblast.h" />
     <ClInclude Include="src\Features\Aimbot\AutoDetonate\AutoDetonate.h" />
     <ClInclude Include="src\Features\Aimbot\AutoRocketJump\AutoRocketJump.h" />
+    <ClInclude Include="src\Features\Aimbot\AutoRocketJump\JumpPolicy.h" />
     <ClInclude Include="src\Features\Aimbot\AutoTrolldier\AutoTrolldier.h" />
     <ClInclude Include="src\Features\Aimbot\AutoTrolldier\Intercept.h" />
     <ClInclude Include="src\Features\Aimbot\AutoTrolldier\Rotation.h" />
