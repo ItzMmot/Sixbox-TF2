@@ -1,1 +1,1 @@
-best client for fucking maggots ever made btw
+best client to fuck maggots ever made btw
