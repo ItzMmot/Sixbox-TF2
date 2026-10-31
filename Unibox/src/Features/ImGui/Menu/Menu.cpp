@@ -457,6 +457,32 @@ void CMenu::MenuESP()
 		FToggle("Distance to alpha## Glow", &tGroup.m_tGlow.SmoothAlpha);
 	} EndSection();
 
+    if (Section("Aura"))
+    {
+        auto& effect=tGroup.m_tAura;
+        FToggle("Enabled## Aura", &effect.Enabled);
+        FTooltip("Continuous model coating. Up to 8 active Aura groups; viewmodel groups have priority.");
+        PushTransparent(!effect.Enabled);
+        static std::vector<const char*> modes(std::begin(Aura::ModeNames),std::end(Aura::ModeNames));
+        static std::vector<const char*> quality={"Low", "Medium", "High"};
+        if (FDropdown("Mode## Aura", &effect.Mode, modes))
+            effect.Additive=Aura::DefaultAdditive(effect.Mode);
+#define AURA_SLIDER(n,l,d,lo,hi,step) FSlider(l "## Aura", &effect.n,lo,hi,step,"%g",FSliderEnum::Clamp | FSliderEnum::Precision);
+        AURA_FLOAT_SETTINGS(AURA_SLIDER)
+#undef AURA_SLIDER
+        FDropdown("Quality## Aura", &effect.Quality, quality);
+        FDropdown("Coverage## Aura", &effect.Coverage, {"Full", "Outline", "Fill"});
+        FToggle("Additive blend## Aura", &effect.Additive);
+        FToggle("Visible sources only## Aura", &effect.VisibleOnly);
+        FToggle("Preset colors## Aura", &effect.PresetColors);
+        FToggle("Use group color## Aura", &effect.GroupColor);
+        PushTransparent(Transparent || effect.PresetColors || effect.GroupColor);
+        FColorPicker("Core color## Aura", &effect.Core, FColorPickerEnum::Full);
+        FColorPicker("Edge color## Aura", &effect.Edge, FColorPickerEnum::Full);
+        PopTransparent();
+        PopTransparent();
+    } EndSection();
+
 	EndTable();
 }
 

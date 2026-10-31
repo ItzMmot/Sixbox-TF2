@@ -1,5 +1,6 @@
 #ifndef TEXTMODE
 #include "Render.h"
+#include "../Visuals/Aura/Aura.h"
 
 #include "../../Hooks/Direct3DDevice9.h"
 #include <ImGui/imgui_impl_win32.h>
@@ -70,6 +71,9 @@ void CRender::Render(IDirect3DDevice9* pDevice)
 	F::Menu.m_bInputReady = !bAntiObs || bPrivate || bUnsupported;
 
 	F::Menu.Render();
+    if (I::EngineClient->IsInGame() && bDrawGame && !bPrivate && !bTransient && !SDK::CleanScreenshot() && !I::EngineVGui->IsGameUIVisible())
+        F::Aura.Render(pDevice);
+    else F::Aura.Hide();
 
 	if (I::EngineClient->IsInGame() && !bTransient && (bPrivate || bDrawGame && !SDK::TakingScreenshot()))
 	{

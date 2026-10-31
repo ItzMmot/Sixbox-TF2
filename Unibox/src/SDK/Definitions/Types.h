@@ -1,4 +1,5 @@
 #pragma once
+#include "../../Features/Visuals/Aura/AuraPolicy.h"
 #include "../../Utils/Math/BaseMath.h"
 #include <numbers>
 #include <string>
@@ -1173,6 +1174,12 @@ struct ESP_t
 	{
 		return Draw;
 	}
+};
+
+struct Aura_t : Aura::Settings
+{
+    Color_t Core = { 255, 162, 72, 255 };
+    Color_t Edge = { 191, 65, 29, 255 };
 };
 
 struct Glow_t

@@ -1,4 +1,6 @@
 #include "../SDK/SDK.h"
+#include "../Features/Visuals/Aura/Aura.h"
+#include "../Features/Visuals/Groups/Groups.h"
 
 #include "../Features/Visuals/Chams/Chams.h"
 #include "../Features/Visuals/Glow/Glow.h"
@@ -19,6 +21,10 @@ MAKE_HOOK(IVModelRender_DrawModelExecute, U::Memory.GetVirtual(I::ModelRender, 1
 	if (I::EngineVGui->IsGameUIVisible() || SDK::CleanScreenshot()
 		|| F::CameraWindow.m_bDrawing || !F::Materials.m_bLoaded || G::Unload)
 		return CALL_ORIGINAL(rcx, pState, pInfo, pBoneToWorld);
+
+    if (CAura::Capturing()) return CALL_ORIGINAL(rcx,pState,pInfo,pBoneToWorld);
+    if (!F::CameraWindow.m_bDrawing && (!F::Chams.m_bRendering || s_bDrawingViewmodel) && !F::Glow.m_bRendering)
+        F::Aura.Capture(rcx,pState,pInfo,pBoneToWorld,CALL_ORIGINAL);
 
 	if (F::Chams.m_bRendering)
 		return F::Chams.RenderHandler(rcx, pState, pInfo, pBoneToWorld);
@@ -50,6 +56,8 @@ MAKE_HOOK(CBaseAnimating_InternalDrawModel, S::CBaseAnimating_InternalDrawModel(
 	if (!s_bDrawingViewmodel /*|| !(flags & STUDIO_RENDER)*/)
 		return CALL_ORIGINAL(rcx, flags);
 
+    struct RestoreKind { int old; ~RestoreKind() { CAura::SetViewmodelKind(old); } } auraKind{
+        CAura::SetViewmodelKind(rcx->IsValid() ? TargetsEnum::ViewmodelHands : TargetsEnum::ViewmodelWeapon)};
 	int iReturn;
 	F::Glow.RenderViewmodel(rcx, flags);
 	if (F::Chams.RenderViewmodel(rcx, flags, &iReturn))

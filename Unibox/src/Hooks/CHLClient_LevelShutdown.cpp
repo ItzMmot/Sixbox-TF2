@@ -11,6 +11,7 @@
 #include "../Features/NavBot/Jobs/NavBotJobs.h"
 #include "../Features/Misc/AutoVote/AutoVote.h"
 #ifndef TEXTMODE
+#include "../Features/Visuals/Aura/Aura.h"
 #include "../Features/Visuals/SkinChanger/SkinChanger.h"
 #endif
 
@@ -27,6 +28,7 @@ MAKE_HOOK(CHLClient_LevelShutdown, U::Memory.GetVirtual(I::Client, 7), void,
 	F::EnginePrediction.Unload();
 	F::Spectate.Reset();
 #ifndef TEXTMODE
+    F::Aura.ClearScene();
 	G::TriggerStorage.clear();
 	G::PasstimeGoalStorage.clear();
 #endif

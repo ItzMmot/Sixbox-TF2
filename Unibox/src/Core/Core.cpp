@@ -18,6 +18,7 @@
 #ifndef TEXTMODE
 #include "../Features/ImGui/Overlay/CaptureOverlay.h"
 #include "../Features/ImGui/RenderSync.h"
+#include "../Features/Visuals/Aura/Aura.h"
 #endif
 #include "../SDK/Events/Events.h"
 #ifdef TEXTMODE
@@ -253,6 +254,7 @@ void CCore::Unload()
 	for (int i = 0; i < 200 && !F::Materials.IsUnloadComplete(); ++i)
 		Sleep(10);
 	F::RenderSync.WaitIdle(1000);
+    F::Aura.WaitIdle(1000);
 #endif
 
 #ifndef TEXTMODE

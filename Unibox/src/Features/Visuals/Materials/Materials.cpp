@@ -1,6 +1,9 @@
 #include "Materials.h"
 
 #include "../Glow/Glow.h"
+#ifndef TEXTMODE
+#include "../Aura/Aura.h"
+#endif
 #include "../CameraWindow/CameraWindow.h"
 #include "../../Configs/Configs.h"
 #include "../../Binds/Binds.h"
@@ -392,6 +395,9 @@ void CMaterials::LoadMaterials()
 		if (bDx9Shaders)
 			I::MaterialSystem->BeginRenderTargetAllocation();
 		F::Glow.Initialize();
+#ifndef TEXTMODE
+        F::Aura.InitializeMaterials();
+#endif
 		F::CameraWindow.Initialize();
 		if (bDx9Shaders)
 			I::MaterialSystem->EndRenderTargetAllocation();
@@ -452,6 +458,9 @@ void CMaterials::UnloadMaterials()
 	m_bLoaded = false;
 
 	F::Glow.Unload();
+#ifndef TEXTMODE
+    F::Aura.ShutdownMaterials();
+#endif
 	F::CameraWindow.Unload();
 
 	for (auto& tMaterial : m_mMaterials | std::views::values)

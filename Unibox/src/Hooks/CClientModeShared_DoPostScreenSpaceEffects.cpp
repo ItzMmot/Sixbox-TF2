@@ -1,4 +1,5 @@
 #include "../SDK/SDK.h"
+#include "../Features/Visuals/Aura/Aura.h"
 
 #include "../Features/Visuals/Chams/Chams.h"
 #include "../Features/Visuals/Glow/Glow.h"
@@ -36,6 +37,8 @@ MAKE_HOOK(CClientModeShared_DoPostScreenSpaceEffects, U::Memory.GetVirtual(I::Cl
 
 	F::Chams.RenderMain();
 	F::Glow.RenderFirst();
+    if (pSetup) F::Aura.SetWorldView(*pSetup);
+    F::Aura.Publish();
 	return CALL_ORIGINAL(rcx, pSetup);
 #endif
 }
@@ -46,10 +49,13 @@ MAKE_HOOK(CViewRender_DrawViewModels, S::CViewRender_DrawViewModels(), void,
 	DEBUG_RETURN(CViewRender_DrawViewModels, rcx, viewRender, drawViewmodel);
 
 #ifndef TEXTMODE
+    if (!SDK::CleanScreenshot() && !F::CameraWindow.m_bDrawing && !I::EngineVGui->IsGameUIVisible())
+        F::Aura.BeginViewmodels(viewRender);
 	CALL_ORIGINAL(rcx, viewRender, F::Spectate.HasTarget() && !I::EngineClient->IsHLTV() ? false : drawViewmodel);
 	if (SDK::CleanScreenshot() || F::CameraWindow.m_bDrawing || I::EngineVGui->IsGameUIVisible() || !F::Materials.m_bLoaded)
 		return;
 
 	F::Glow.RenderSecond();
+    F::Aura.Publish();
 #endif
 }

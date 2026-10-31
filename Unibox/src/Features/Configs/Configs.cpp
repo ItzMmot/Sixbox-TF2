@@ -342,6 +342,27 @@ template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::s
 	t.put_child(s, tChild);
 }
 
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const Aura_t& v)
+{
+    boost::property_tree::ptree child;
+    SaveJson(child,"Enabled",v.Enabled);
+    SaveJson(child,"Mode",v.Mode);
+    SaveJson(child,"ModeCatalog",Aura::CatalogVersion);
+    SaveJson(child,"Quality",v.Quality);
+    SaveJson(child,"Coverage",v.Coverage);
+    SaveJson(child,"Additive",v.Additive);
+    SaveJson(child,"GroupColor",v.GroupColor);
+    SaveJson(child,"PresetColors",v.PresetColors);
+    SaveJson(child,"VisibleOnly",v.VisibleOnly);
+
+    SaveJson(child,"Core",v.Core);
+    SaveJson(child,"Edge",v.Edge);
+#define AURA_SAVE(n,l,d,lo,hi,step) SaveJson(child,#n,v.n);
+    AURA_FLOAT_SETTINGS(AURA_SAVE)
+#undef AURA_SAVE
+    t.put_child(s,child);
+}
+
 template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const ESP_t& v)
 {
 	boost::property_tree::ptree tChild;
@@ -493,6 +514,31 @@ template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const 
 		LoadJson(*tChild, "End", v.End);
 		LoadJson(*tChild, "SmoothAlpha", v.SmoothAlpha);
 	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, Aura_t& v)
+{
+    if(auto child=t.get_child_optional(s))
+    {
+        LoadJson(*child,"Enabled",v.Enabled);
+        LoadJson(*child,"Mode",v.Mode);
+        LoadJson(*child,"Quality",v.Quality);
+        LoadJson(*child,"Coverage",v.Coverage);
+        LoadJson(*child,"Additive",v.Additive);
+        LoadJson(*child,"GroupColor",v.GroupColor);
+        LoadJson(*child,"PresetColors",v.PresetColors);
+        LoadJson(*child,"VisibleOnly",v.VisibleOnly);
+
+        LoadJson(*child,"Core",v.Core);
+        LoadJson(*child,"Edge",v.Edge);
+#define AURA_LOAD(n,l,d,lo,hi,step) LoadJson(*child,#n,v.n);
+        AURA_FLOAT_SETTINGS(AURA_LOAD)
+#undef AURA_LOAD
+        int catalog=1;
+        LoadJson(*child,"ModeCatalog",catalog);
+        v.Mode=Aura::UpgradeMode(v.Mode,catalog);
+        v.Sanitize();
+    }
 }
 
 template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s,ESP_t& v)
@@ -801,6 +847,7 @@ bool CConfigs::SaveConfig(const std::string& sConfigName, bool bNotify)
 				SaveJson(tChild, "ESP", tGroup.m_tESP);
 				SaveJson(tChild, "Chams", tGroup.m_tChams);
 				SaveJson(tChild, "Glow", tGroup.m_tGlow);
+                SaveJson(tChild, "Aura", tGroup.m_tAura);
 				SaveJson(tChild, "OffscreenArrows", tGroup.m_bOffscreenArrows);
 				SaveJson(tChild, "OffscreenArrowsOffset", tGroup.m_iOffscreenArrowsOffset);
 				SaveJson(tChild, "OffscreenArrowsMaxDistance", tGroup.m_flOffscreenArrowsMaxDistance);
@@ -961,6 +1008,7 @@ bool CConfigs::LoadConfig(const std::string& sConfigName, bool bNotify)
 				LoadJson(tChild, "ESP", tGroup.m_tESP);
 				LoadJson(tChild, "Chams", tGroup.m_tChams);
 				LoadJson(tChild, "Glow", tGroup.m_tGlow);
+                LoadJson(tChild, "Aura", tGroup.m_tAura);
 				LoadJson(tChild, "OffscreenArrows", tGroup.m_bOffscreenArrows);
 				LoadJson(tChild, "OffscreenArrowsOffset", tGroup.m_iOffscreenArrowsOffset);
 				LoadJson(tChild, "OffscreenArrowsMaxDistance", tGroup.m_flOffscreenArrowsMaxDistance);
@@ -1074,6 +1122,7 @@ bool CConfigs::SaveVisual(const std::string& sConfigName, bool bNotify)
 				SaveJson(tChild, "ESP", tGroup.m_tESP);
 				SaveJson(tChild, "Chams", tGroup.m_tChams);
 				SaveJson(tChild, "Glow", tGroup.m_tGlow);
+                SaveJson(tChild, "Aura", tGroup.m_tAura);
 				SaveJson(tChild, "OffscreenArrows", tGroup.m_bOffscreenArrows);
 				SaveJson(tChild, "OffscreenArrowsOffset", tGroup.m_iOffscreenArrowsOffset);
 				SaveJson(tChild, "OffscreenArrowsMaxDistance", tGroup.m_flOffscreenArrowsMaxDistance);
@@ -1175,6 +1224,7 @@ bool CConfigs::LoadVisual(const std::string& sConfigName, bool bNotify)
 				LoadJson(tChild, "ESP", tGroup.m_tESP);
 				LoadJson(tChild, "Chams", tGroup.m_tChams);
 				LoadJson(tChild, "Glow", tGroup.m_tGlow);
+                LoadJson(tChild, "Aura", tGroup.m_tAura);
 				LoadJson(tChild, "OffscreenArrows", tGroup.m_bOffscreenArrows);
 				LoadJson(tChild, "OffscreenArrowsOffset", tGroup.m_iOffscreenArrowsOffset);
 				LoadJson(tChild, "OffscreenArrowsMaxDistance", tGroup.m_flOffscreenArrowsMaxDistance);

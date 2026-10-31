@@ -32,6 +32,7 @@ struct Group_t
 	Chams_t m_tChams = {};
 
 	Glow_t m_tGlow = {};
+	Aura_t m_tAura = {};
 
 	bool m_bOffscreenArrows = false;
 	int m_iOffscreenArrowsOffset = 100;
