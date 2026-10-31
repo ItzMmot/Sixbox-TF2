@@ -1,5 +1,6 @@
 #include "../SDK/SDK.h"
 #include "../Features/Visuals/Aura/Aura.h"
+#include "../Features/Visuals/JumpCoach/JumpCoach.h"
 
 #include "../Features/Visuals/Chams/Chams.h"
 #include "../Features/Visuals/Glow/Glow.h"
@@ -30,6 +31,7 @@ MAKE_HOOK(CClientModeShared_DoPostScreenSpaceEffects, U::Memory.GetVirtual(I::Cl
 	
 	F::NavRender.RenderWorld();
 	F::AutoTrolldier.RenderWorld();
+    F::JumpCoach.RenderWorld();
 	F::Visuals.Triggers(pLocal);
 	F::Visuals.DrawEffects();
 	if (I::EngineVGui->IsGameUIVisible() || !F::Materials.m_bLoaded)

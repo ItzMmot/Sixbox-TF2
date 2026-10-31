@@ -1037,6 +1037,33 @@ static void MiscMain()
 		}
 		PopTransparent();
 
+        Subheader("Jump coach");
+        FToggle(JumpCoach::Enabled);
+        PushTransparent(!JumpCoach::Enabled.Value);
+        {
+            FToggle(JumpCoach::SoldierOnly);
+            FToggle(JumpCoach::OnlyAir);
+            FSlider(JumpCoach::PredictionTime);
+            FSlider(JumpCoach::TraceBudget);
+            FToggle(JumpCoach::DrawPath);
+            FToggle(JumpCoach::DrawIdeal);
+            FToggle(JumpCoach::DrawLanding);
+            FToggle(JumpCoach::ThroughWalls);
+            FToggle(JumpCoach::StrafeHints);
+            FSlider(JumpCoach::MinimumSpeed);
+            FToggle(JumpCoach::RocketTiming);
+            PushTransparent(!JumpCoach::RocketTiming.Value);
+            FSlider(JumpCoach::ShotLead);
+            PopTransparent();
+            FToggle(JumpCoach::DrawHUD);
+            PushTransparent(!JumpCoach::DrawHUD.Value);
+            FSlider(JumpCoach::HUDX);FSlider(JumpCoach::HUDY);FSlider(JumpCoach::HUDScale);
+            PopTransparent();
+            FColorPicker(JumpCoach::PathColor);
+            FNote("Advice only. Solid path holds current input and yaw; dashed path assumes optimal A/D without W/S. Rockets enter the flight estimate only after their actual boost is observed.");
+        }
+        PopTransparent();
+
 		Subheader("Control");
 		FToggle(FastStop);
 		PushDisabled(F::AntiCheatCompatibility.Active());

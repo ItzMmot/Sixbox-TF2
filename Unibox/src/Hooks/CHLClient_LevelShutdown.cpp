@@ -12,6 +12,7 @@
 #include "../Features/Misc/AutoVote/AutoVote.h"
 #ifndef TEXTMODE
 #include "../Features/Visuals/Aura/Aura.h"
+#include "../Features/Visuals/JumpCoach/JumpCoach.h"
 #include "../Features/Visuals/SkinChanger/SkinChanger.h"
 #endif
 
@@ -29,6 +30,7 @@ MAKE_HOOK(CHLClient_LevelShutdown, U::Memory.GetVirtual(I::Client, 7), void,
 	F::Spectate.Reset();
 #ifndef TEXTMODE
     F::Aura.ClearScene();
+    F::JumpCoach.Reset();
 	G::TriggerStorage.clear();
 	G::PasstimeGoalStorage.clear();
 #endif

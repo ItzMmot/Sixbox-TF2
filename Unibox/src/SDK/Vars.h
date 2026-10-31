@@ -850,6 +850,26 @@ NAMESPACE_BEGIN(Vars)
 				VA_LIST("Diagonal", "Vertical", "Horizontal"), Diagonal, Vertical, Horizontal);
 			CVar(AutoRocketJumpWalls, "Wall rocket jumps", false);
 			CVar(AutoRocketJumpWallDistance, "Wall search distance", 112.f, SLIDER_CLAMP, 32.f, 160.f, 4.f, "%g HU");
+			NAMESPACE_BEGIN(JumpCoach)
+                CVar(Enabled, VA_LIST("Jump coach", "Jump coach enabled"), false, VISUAL);
+                CVar(SoldierOnly, "Coach soldier only", false, VISUAL);
+                CVar(OnlyAir, "Coach only in air", false, VISUAL);
+                CVar(PredictionTime, "Coach prediction time", 3.f, VISUAL | SLIDER_CLAMP | SLIDER_PRECISION, .25f, 5.f, .05f, "%gs");
+                CVar(TraceBudget, "Coach trace budget", 2048, VISUAL | SLIDER_CLAMP, 256, 8192, 256);
+                CVar(MinimumSpeed, "Coach strafe minimum speed", 100.f, VISUAL | SLIDER_CLAMP, 20.f, 400.f, 10.f, "%g HU/s");
+                CVar(DrawPath, "Coach flight path", true, VISUAL);
+                CVar(DrawIdeal, "Coach optimal strafe path", true, VISUAL);
+                CVar(DrawLanding, "Coach landing marker", true, VISUAL);
+                CVar(StrafeHints, "Coach strafe hints", true, VISUAL);
+                CVar(RocketTiming, "Coach rocket timing", true, VISUAL);
+                CVar(ShotLead, "Coach impact before landing", .03f, VISUAL | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, .15f, .005f, "%gs");
+                CVar(ThroughWalls, "Coach path through walls", false, VISUAL);
+                CVar(PathColor, "Coach accent color", Color_t(122,132,229,220), VISUAL);
+                CVar(DrawHUD, "Coach HUD", true, VISUAL);
+                CVar(HUDX, "Coach HUD X", 50.f, VISUAL | SLIDER_CLAMP, 0.f, 100.f, 1.f, "%g%%");
+                CVar(HUDY, "Coach HUD Y", 70.f, VISUAL | SLIDER_CLAMP, 0.f, 100.f, 1.f, "%g%%");
+                CVar(HUDScale, "Coach HUD scale", 1.f, VISUAL | SLIDER_CLAMP | SLIDER_PRECISION, .6f, 1.6f, .05f);
+            NAMESPACE_END(JumpCoach)
 			NAMESPACE_BEGIN(AutoTrolldier)
 				CVar(Enabled, VA_LIST("Auto trolldier", "Auto trolldier enabled"), false);
 				CVar(AutoMarketGardenerSwap, "Auto Market Gardener swap", false);

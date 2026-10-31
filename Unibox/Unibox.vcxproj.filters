@@ -74,6 +74,7 @@
     <ClCompile Include="src\Features\Visuals\FakeAngle\FakeAngle.cpp" />
     <ClCompile Include="src\Features\Visuals\Glow\Glow.cpp" />
     <ClCompile Include="src\Features\Visuals\Aura\Aura.cpp" />
+    <ClCompile Include="src\Features\Visuals\JumpCoach\JumpCoach.cpp" />
     <ClCompile Include="src\Features\Visuals\SkinChanger\SkinChanger.cpp" />
     <ClCompile Include="src\Features\Visuals\PlayerConditions\PlayerConditions.cpp" />
     <ClCompile Include="src\Features\Visuals\OffscreenArrows\OffscreenArrows.cpp" />
@@ -491,6 +492,8 @@
     <ClInclude Include="src\Features\Visuals\Aura\AuraPolicy.h" />
     <ClInclude Include="src\Features\Visuals\Aura\AuraShader.h" />
     <ClInclude Include="src\Features\Visuals\Aura\AuraTexture.h" />
+    <ClInclude Include="src\Features\Visuals\JumpCoach\JumpCoach.h" />
+    <ClInclude Include="src\Features\Visuals\JumpCoach\CoachPolicy.h" />
     <ClInclude Include="src\Features\Visuals\Aura\AuraBytecode.h" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\SkinChanger.h" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\SkinData.h" />

@@ -1,4 +1,7 @@
 #include "Createmove.h"
+#ifndef TEXTMODE
+#include "../Visuals/JumpCoach/JumpCoach.h"
+#endif
 #include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
 #include "../Aimbot/AutoRocketJump/AutoRocketJump.h"
 
@@ -65,6 +68,9 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	{
 		F::AutoRocketJump.Reset();
 		F::AutoTrolldier.Reset();
+#ifndef TEXTMODE
+        F::JumpCoach.Reset();
+#endif
 		return;
 	}
 
@@ -123,6 +129,9 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 #endif
 	}
 	F::EnginePrediction.End(pLocal, pCmd);
+#ifndef TEXTMODE
+    F::JumpCoach.Update(pLocal,pWeapon,pCmd);
+#endif
 		F::Resolver.CreateMove();
 		F::NoSpreadHitscan.AskForPlayerPerf();
 	G::Choking = !G::SendPacket, G::LastUserCmd = pCmd;

@@ -1,6 +1,7 @@
 #ifndef TEXTMODE
 #include "Render.h"
 #include "../Visuals/Aura/Aura.h"
+#include "../Visuals/JumpCoach/JumpCoach.h"
 
 #include "../../Hooks/Direct3DDevice9.h"
 #include <ImGui/imgui_impl_win32.h>
@@ -92,6 +93,7 @@ void CRender::Render(IDirect3DDevice9* pDevice)
 		F::PlayerConditions.Draw();
 		F::Backtrack.Draw();
 		F::NavRender.DrawIndicators();
+        if(!I::EngineVGui->IsGameUIVisible()) F::JumpCoach.DrawHUD();
 
 		F::ESP.Draw(pBackground);
 		F::Aimbot.Draw(pBackground);
