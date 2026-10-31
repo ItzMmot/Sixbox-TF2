@@ -21,6 +21,9 @@ jobs:
       working-directory: ${{ env.GITHUB_WORKSPACE }}
       run: nuget restore
 
+    - name: Validate Aura shader sources
+      run: python .github/scripts/build-aura-shaders.py --check
+
     - name: Build
       working-directory: ${{ env.GITHUB_WORKSPACE }}
       run: msbuild Unibox.sln /p:Platform=${{ matrix.platform }} /p:Configuration=${{ matrix.configuration }}
