@@ -707,43 +707,55 @@ void CAimbotMelee::BacktrackToCrosshair(CTFPlayer* pLocal, CUserCmd* pCmd)
 
 void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
-	// Losing the planned victim during a committed swing releases movement,
-	// but must not redirect the in-flight strike to a different player.
-	if (!F::AutoTrolldier.IsActive(pCmd) && F::AutoTrolldier.HasCommittedStrike(pLocal, pWeapon, pCmd)) return;
-	if (F::AutoTrolldier.IsActive(pCmd))
+	const bool committed = F::AutoTrolldier.HasCommittedStrike(pLocal, pWeapon, pCmd);
+	if (F::AutoTrolldier.IsActive(pCmd) || committed)
 	{
 		const bool automatic = Vars::Misc::Movement::AutoTrolldier::AutoAimbot.Value;
-		if (F::AutoTrolldier.AwaitingSwing() && pWeapon->m_flSmackTime() <= 0.f) return;
+		const float smack = pWeapon->m_flSmackTime();
+		const bool pending = smack > 0.f;
+		if (automatic && !pending) pCmd->buttons &= ~IN_ATTACK;
+		if (F::AutoTrolldier.AwaitingSwing() && !pending) return;
 		if (!automatic && (!Vars::Aimbot::General::AimType.Value
 			|| !(Vars::Aimbot::General::Target.Value & Vars::Aimbot::General::TargetEnum::Players))) return;
 		Trolldier::AimSettingsGuard aimSettings(Vars::Aimbot::General::AimType.Value, Vars::Aimbot::General::AutoShoot.Value,
 			Vars::Aimbot::General::Target.Value, Vars::Aimbot::General::LeadAndRestrict.Value, automatic,
 			automatic ? F::AutoTrolldier.AutomaticAimType() : Vars::Aimbot::General::AimType.Value,
 			Vars::Aimbot::General::TargetEnum::Players);
-		auto* pTarget = F::AutoTrolldier.GetTarget();
-		if (!pTarget || (!G::CanPrimaryAttack && pWeapon->m_flSmackTime() < 0.f))
-			return;
-		const float delay = pWeapon->m_flSmackTime() > 0.f
-			? std::max(0.f, pWeapon->m_flSmackTime() - I::GlobalVars->curtime) : pWeapon->GetSmackDelay();
-		Vec3 eye, origin;
-		if (!F::AutoTrolldier.StrikePrediction(pLocal, pWeapon, pCmd, delay, eye, origin))
-			return;
+		auto* pTarget = F::AutoTrolldier.GetStrikeTarget(pLocal, pWeapon, pCmd);
+		if (!pTarget || pTarget->IsDormant() || !pTarget->IsAlive() || pTarget->IsInvulnerable()
+			|| pTarget->m_iTeamNum() == pLocal->m_iTeamNum()
+			|| F::AimbotGlobal.ShouldIgnore(pTarget, pLocal, pWeapon) || (!G::CanPrimaryAttack && !pending)) return;
 
-		const Vec3 point = eye.Clamp(origin + pTarget->m_vecMins(), origin + pTarget->m_vecMaxs());
-		Vec3 angles;
-		Aim(pCmd->viewangles, Math::CalcAngle(eye, point), angles);
-		if (!F::AimbotGlobal.ShouldAimAtAngle(angles))
-			return;
+		const float now = TICKS_TO_TIME(pLocal->m_nTickBase());
+		const bool due = pending && now > smack;
+		Vec3 eye = pLocal->GetShootPos(), origin = pTarget->m_vecOrigin();
+		// Forecasts authorize a NEW swing. The actual impact uses the current
+		// predicted shooter and an authoritative target snapshot, even if the
+		// steering solver lost its future intercept during this committed swing.
+		if (!pending && !F::AutoTrolldier.StrikePrediction(pLocal, pWeapon, pCmd, pWeapon->GetSmackDelay(), eye, origin)) return;
+		if (pending && !due)
+		{
+			Vec3 predictedEye, predictedOrigin;
+			if (F::AutoTrolldier.StrikePrediction(pLocal, pWeapon, pCmd, std::max(0.f, smack - now), predictedEye, predictedOrigin))
+			{ eye = predictedEye; origin = predictedOrigin; }
+		}
 
 		const float scale = std::max(1.f, pLocal->m_flModelScale());
 		const float range = SDK::AttribHookValue(pWeapon->GetSwingRange(), "melee_range_multiplier", pWeapon) * scale;
 		const float hull = SDK::AttribHookValue(18.f, "melee_bounds_multiplier", pWeapon) * scale;
-		Vec3 forward; Math::AngleVectors(angles, &forward);
+		if (!std::isfinite(range) || !std::isfinite(hull) || range <= 2.f || hull <= 3.f) return;
+		const Vec3 mins = origin + pTarget->m_vecMins() + PLAYER_ORIGIN_COMPRESSION;
+		const Vec3 maxs = origin + pTarget->m_vecMaxs() - PLAYER_ORIGIN_COMPRESSION;
+		if (mins.x > maxs.x || mins.y > maxs.y || mins.z > maxs.z) return;
+		const auto interiorPoint = Trolldier::InteriorPoint({ eye.x, eye.y, eye.z },
+			{ mins.x, mins.y, mins.z }, { maxs.x, maxs.y, maxs.z });
+		const Vec3 center = (mins + maxs) * .5f;
+		const Vec3 points[] = { { interiorPoint.x, interiorPoint.y, interiorPoint.z }, center,
+			{ center.x, center.y, mins.z + (maxs.z - mins.z) * .7f },
+			{ center.x, center.y, mins.z + (maxs.z - mins.z) * .3f } };
+		Vec3 angles, point;
 		bool hit = false;
 		{
-			// Same native melee hull validation as the regular aimbot, but using
-			// the bounded intercept plan. No record maps, path vectors or MoveSim
-			// allocations are needed. Restore every field before leaving the scope.
 			struct RestoreTarget
 			{
 				CTFPlayer* player;
@@ -758,27 +770,53 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 			pTarget->SetAbsOrigin(origin);
 			pTarget->m_vecMins() += PLAYER_ORIGIN_COMPRESSION;
 			pTarget->m_vecMaxs() -= PLAYER_ORIGIN_COMPRESSION;
-			CTraceFilterHitscan filter(pLocal);
-			CGameTrace trace = {};
-			const Vec3 end = eye + forward * range;
-			SDK::TraceHull(eye, end, {}, {}, MASK_SOLID, &filter, &trace);
-			hit = trace.m_pEnt == pTarget;
-			if (!hit)
+			for (const auto& candidate : points)
 			{
-				SDK::TraceHull(eye, end, { -hull, -hull, -hull }, { hull, hull, hull }, MASK_SOLID, &filter, &trace);
-				hit = trace.m_pEnt == pTarget;
+				Aim(pCmd->viewangles, Math::CalcAngle(eye, candidate), angles);
+				if (!F::AimbotGlobal.ShouldAimAtAngle(angles)) continue;
+				if (pending && !due) { point = candidate; hit = true; break; }
+				Vec3 forward; Math::AngleVectors(angles, &forward);
+				const float safeRange = pending ? range : range - 2.f;
+				const float safeHull = pending ? hull : hull - 3.f;
+				const Vec3 end = eye + forward * safeRange;
+				CTraceFilterHitscan filter(pLocal);
+				CGameTrace trace = {};
+				SDK::TraceHull(eye, end, {}, {}, MASK_SOLID, &filter, &trace);
+				hit = trace.m_pEnt == pTarget && !trace.startsolid && !trace.allsolid;
+				// Native melee only tries its hull after an unobstructed ray.
+				// A wall or a different player hit by the ray owns that strike.
+				if (!hit && Trolldier::HullFallback(trace.fraction, trace.startsolid, trace.allsolid))
+				{
+					SDK::TraceHull(eye, end, { -safeHull, -safeHull, -safeHull }, { safeHull, safeHull, safeHull }, MASK_SOLID, &filter, &trace);
+					hit = trace.m_pEnt == pTarget && !trace.startsolid && !trace.allsolid;
+				}
+				if (hit) { point = candidate; break; }
 			}
 		}
-		if (!hit)
-			return;
-		if (Vars::Aimbot::General::AutoShoot.Value && G::CanPrimaryAttack && pWeapon->m_flSmackTime() < 0.f)
+		if (!hit) return;
+		if (!pending && Vars::Aimbot::General::AutoShoot.Value && G::CanPrimaryAttack)
 			pCmd->buttons |= IN_ATTACK;
 		G::Attacking = SDK::IsAttacking(pLocal, pWeapon, pCmd, true);
-		if (G::Attacking)
-			F::Aimbot.m_eRanType = EWeaponType::MELEE;
+		if (G::Attacking) F::Aimbot.m_eRanType = EWeaponType::MELEE;
+		if (due && !F::AntiCheatCompatibility.Active())
+		{
+			// Match the very snapshot traced above, like the regular melee aim.
+			// This also matters at 0 ping: interpolation still rewinds victims.
+			const float simTime = pTarget->m_flSimulationTime();
+			if (std::isfinite(simTime) && std::abs(TICKS_TO_TIME(F::Backtrack.GetRewindTick()) - simTime) < .2f)
+				pCmd->tick_count = TIME_TO_TICKS(simTime) + TIME_TO_TICKS(F::Backtrack.GetFakeInterp());
+		}
 		G::AimTarget = { pTarget->entindex(), I::GlobalVars->tickcount };
 		G::AimPoint = { point, I::GlobalVars->tickcount };
-		Aim(pCmd, angles);
+		const int method = Vars::Aimbot::General::AimType.Value;
+		if (pending && (method == Vars::Aimbot::General::AimTypeEnum::Silent || method == Vars::Aimbot::General::AimTypeEnum::Plain))
+		{
+			SDK::FixMovement(pCmd, angles);
+			pCmd->viewangles = angles;
+			if (method == Vars::Aimbot::General::AimTypeEnum::Silent) G::SilentAngles = true;
+			else I::EngineClient->SetViewAngles(angles);
+		}
+		else Aim(pCmd, angles);
 		return;
 	}
 

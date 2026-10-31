@@ -41,6 +41,39 @@ Changing weapon, landing, losing a reachable target or disabling the bind releas
 flight control. The swap cycle can finish waiting for an already-started swing
 after landing. **Cancel on movement input** releases control while WASD is held.
 
+## Gardener strike controller
+
+New automated swings require the native impact tick to lie inside a continuous
+contact window, with a valid sample on each side. A one-tick graze or a future
+hit two ticks after the actual impact no longer authorizes a swing. Targets
+without at least three consecutive contact samples are excluded from new-swing
+selection, so a nearby one-tick graze cannot displace a reliable farther target. Native range
+and hull checks use a small launch margin. Aim tries interior body points instead
+of the outermost AABB edge. The hull fallback only runs when the initial melee
+ray is clear, matching Valve's trace order.
+
+Once a swing starts, tracking its reserved victim continues even if the flight
+solver cannot find another complete intercept. At impact the controller uses the
+actual predicted shoot position and current target snapshot rather than reusing
+an optimistic future path. Silent/Plain tracking runs through the windup; flight
+rotations and anti-aim cannot replace a committed strike's aim. Invalid/dead
+victims still release targeting without redirecting that swing to another player.
+
+Market Gardener impact timing follows the native strict `curtime > smackTime`
+condition, including deadlines exactly on a server tick. On the impact command,
+the snapshot's simulation time and the existing interpolation offset are aligned
+using the same command tick adjustment as regular melee aim (subject to the
+existing compatibility mode and a 200 ms validity check). Interpolation can matter
+even at zero network latency. No extra network messages are introduced.
+
+The final approach preserves enemy velocity when damping position error, so a
+moving victim's speed is not accidentally damped with the remaining distance.
+None of these checks can guarantee a hit after an unpredicted movement, loss of
+blast-jump state, or a server-side rule change.
+
+Native timing, lag compensation and trace order reference:
+[Valve TF2 melee implementation](https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/game/shared/tf/tf_weaponbase_melee.cpp).
+
 ## Settings
 
 | Setting | Default | Purpose |
@@ -113,6 +146,10 @@ Then run `/tmp/auto-trolldier-test`. It covers Source acceleration, ballistic
 height, stationary and moving intercepts, unreachable targets, target retention,
 wall/landing rejection, bounded trace counts, invalid input, allocation-free
 solves and rotation wrap/speed/acceleration/convergence checks. Swing completion/hit/timeout tracking and scoped aim restoration are also tested.
+Closed-loop windup tests replan every command for stationary/moving targets and
+a fast 800 HU/s pass, then check native finite-ray/hull reach at the impact tick.
+Additional cases cover strict/exact-tick deadlines, stable launch windows,
+interior aim points and obstruction-aware hull fallback.
 These tests do not
 establish live-server hit reliability. In-game checks
 must cover ascending/descending jumps, crouching, input interruption, weapon

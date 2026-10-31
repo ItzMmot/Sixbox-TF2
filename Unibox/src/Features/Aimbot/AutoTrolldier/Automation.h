@@ -1,9 +1,35 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include "Intercept.h"
 
 namespace Trolldier
 {
+	// ItemPostFrame smacks strictly AFTER the deadline. Sample 1 is the current
+	// command's movement, because flight planning runs before engine prediction.
+	inline int ImpactSample(int tickBase, float interval, float deadline)
+	{
+		if (tickBase < 0 || tickBase > std::numeric_limits<int>::max() - MaxTicks
+			|| !std::isfinite(interval) || interval <= 0.f || !std::isfinite(deadline)) return 0;
+		for (int offset = 0; offset < MaxTicks; ++offset)
+			if (float(tickBase + offset) * interval > deadline) return offset + 1;
+		return 0;
+	}
+	inline bool StableStrikeWindow(const Plan& plan, int sample)
+	{
+		return plan.target >= 0 && plan.windowTicks >= 3 && sample > plan.hitTick
+			&& sample < plan.endTick && sample <= MaxTicks;
+	}
+	inline Vector InteriorPoint(Vector eye, Vector mins, Vector maxs, float inset = 3.f)
+	{
+		const Vector pad = { std::min(inset, (maxs.x - mins.x) * .5f),
+			std::min(inset, (maxs.y - mins.y) * .5f), std::min(inset, (maxs.z - mins.z) * .5f) };
+		return Nearest(eye, mins + pad, maxs - pad);
+	}
+	inline bool HullFallback(float rayFraction, bool startSolid, bool allSolid)
+	{
+		return rayFraction >= 1.f && !startSolid && !allSolid;
+	}
 	enum class SwingResult { None, Waiting, Hit, Unconfirmed, Cancelled };
 	class SwingTracker
 	{

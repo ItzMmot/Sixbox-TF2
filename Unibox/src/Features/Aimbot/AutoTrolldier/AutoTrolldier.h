@@ -66,6 +66,10 @@ public:
 	void Reset();
 	bool IsActive(const CUserCmd* pCmd) const;
 	CTFPlayer* GetTarget() const { return m_target.Get(); }
+	CTFPlayer* GetStrikeTarget(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, const CUserCmd* pCmd) const
+	{
+		return HasCommittedStrike(pLocal, pWeapon, pCmd) ? m_strikeTarget.Get() : IsActive(pCmd) ? m_target.Get() : nullptr;
+	}
 	bool StrikePrediction(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd,
 		float flDelay, Vec3& vEye, Vec3& vTargetOrigin) const;
 };

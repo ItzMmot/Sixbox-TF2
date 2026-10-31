@@ -296,7 +296,10 @@ void CAutoTrolldier::Prepare(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd
 		ResetControl();
 		return;
 	}
-	m_settings.strikeTick = std::max(1, int(std::ceil(delay / m_settings.interval)) + 1);
+	const int impactSample = Trolldier::ImpactSample(pLocal->m_nTickBase(), m_settings.interval,
+		pending > 0.f ? pending : TICKS_TO_TIME(pLocal->m_nTickBase()) + delay);
+	if (!impactSample) { ResetControl(); return; }
+	m_settings.strikeTick = std::max(1, impactSample - 1); // retain the pre-impact safety sample
 	Trolldier::Actor local = { Snapshot(pLocal->m_vecOrigin()), Snapshot(pLocal->m_vecVelocity()),
 		Snapshot(pLocal->m_vecMins() + PLAYER_ORIGIN_COMPRESSION), Snapshot(pLocal->m_vecMaxs() - PLAYER_ORIGIN_COMPRESSION), Gravity(pLocal), false };
 	if (!local.Valid())
@@ -356,7 +359,7 @@ void CAutoTrolldier::Prepare(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd
 			if (!a.grounded) a.velocity.z -= a.gravity * lead;
 		}
 	}
-	m_solver.Solve(local, m_targets, count, m_settings, TraceWorld, this, previous, m_plan, previousSide);
+	m_solver.Solve(local, m_targets, count, m_settings, TraceWorld, this, previous, m_plan, previousSide, pending > 0.f ? 1 : 3);
 	if (m_plan.target < 0)
 	{
 		m_target.Term();
@@ -470,10 +473,10 @@ bool CAutoTrolldier::StrikePrediction(CTFPlayer* pLocal, CTFWeaponBase* pWeapon,
 		return false;
 	if (flDelay > Trolldier::MaxTicks * m_settings.interval)
 		return false;
-	// Prepare runs before prediction; the melee adapter runs after this
-	// command's predicted movement. Sample one Tick beyond the strike delay.
-	const int tick = std::max(1, int(std::ceil(flDelay / m_settings.interval)) + 1);
-	if (tick > m_plan.endTick || m_plan.hitTick > tick + 2)
+	const bool pending = pWeapon->m_flSmackTime() > 0.f;
+	const int tick = Trolldier::ImpactSample(pLocal->m_nTickBase(), m_settings.interval,
+		pending ? pWeapon->m_flSmackTime() : TICKS_TO_TIME(pLocal->m_nTickBase()) + flDelay);
+	if (!tick || tick > m_plan.endTick || (!pending && !Trolldier::StableStrikeWindow(m_plan, tick)))
 		return false;
 	vEye = Native(m_plan.path[tick].local + m_settings.eyeOffset);
 	vTargetOrigin = Native(m_plan.path[tick].target);

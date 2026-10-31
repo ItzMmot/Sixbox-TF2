@@ -33,7 +33,9 @@ bool CAntiAim::YawOn()
 
 bool CAntiAim::ShouldRun(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
-	if (F::AutoTrolldier.IsActive(pCmd) && Vars::Misc::Movement::AutoTrolldier::Rotation.Value)
+	if (F::AutoTrolldier.HasCommittedStrike(pLocal, pWeapon, pCmd)
+		|| F::AutoTrolldier.IsActive(pCmd) && (Vars::Misc::Movement::AutoTrolldier::Rotation.Value
+			|| G::AimPoint.m_iTickCount == I::GlobalVars->tickcount))
 		return false;
 	if (!pLocal->IsAlive() || pLocal->IsAGhost() || (pLocal->IsTaunting() && !Vars::AntiAim::TauntSpin.Value) || pLocal->m_MoveType() != MOVETYPE_WALK && !(pLocal->IsTaunting() && Vars::AntiAim::TauntSpin.Value) || pLocal->InCond(TF_COND_HALLOWEEN_KART)
 		|| G::Attacking == 1 || F::AutoRocketJump.IsRunning() || F::Ticks.m_bDoubletap // this m_bDoubletap check can probably be removed if we fix tickbase correctly

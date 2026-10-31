@@ -36,8 +36,89 @@ static Actor Body(Vector origin, Vector velocity = {}, bool grounded = false)
 {
     return {origin, velocity, {-24,-24,0}, {24,24,82}, 800.f, grounded};
 }
+// Drive the real planner one command at a time through a full MG windup.
+// This catches errors hidden by a single optimistic, open-loop trajectory.
+static void GardenPass(Actor local, Actor target)
+{
+    Solver solver; Settings s; Plan plan; World world;
+    s.traceBudget = 4096; s.ticks = 90; s.reach = 58.f;
+    std::array<Actor, MaxTargets> targets{};
+    float deadline = -1.f;
+    int previous = -1;
+    Vector side;
+    for (int command = 0; command < 100; ++command)
+    {
+        const int base = 1000 + command;
+        const float now = float(base) * s.interval;
+        const int impact = ImpactSample(base, s.interval, deadline > 0.f ? deadline : now + .2f);
+        assert(impact);
+        s.strikeTick = std::max(1, impact - 1);
+        targets[0] = target;
+        const auto before = allocations;
+        solver.Solve(local, targets, 1, s, TraceWorld, &world, previous, plan, side, deadline > 0.f ? 1 : 3);
+        assert(allocations == before);
+        const Vector wish = plan.target >= 0 ? plan.wish : Vector{};
+        if (deadline < 0.f && StableStrikeWindow(plan, impact)) deadline = now + .2f;
+        previous = plan.target; side = plan.side;
+        local.velocity.z -= local.gravity * s.interval * .5f;
+        local.velocity = Accelerate(local.velocity, wish, s);
+        local.origin = local.origin + local.velocity * s.interval;
+        local.velocity.z -= local.gravity * s.interval * .5f;
+        target.origin = target.origin + target.velocity * s.interval;
+        if (deadline > 0.f && now > deadline)
+        {
+            assert(local.origin.z > 0.f); // must still be airborne at impact
+            const Vector eye = local.origin + s.eyeOffset;
+            const Vector point = InteriorPoint(eye, target.origin + target.mins, target.origin + target.maxs);
+            Vector delta = point - eye;
+            assert(delta.Squared() > 0.f);
+            const Vector ray = delta * (48.f / std::sqrt(delta.Squared()));
+            const Vector lo = target.origin + target.mins - Vector{18,18,18};
+            const Vector hi = target.origin + target.maxs + Vector{18,18,18};
+            float enter = 0.f, leave = 1.f;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                const float start = axis == 0 ? eye.x : axis == 1 ? eye.y : eye.z;
+                const float dir = axis == 0 ? ray.x : axis == 1 ? ray.y : ray.z;
+                const float min = axis == 0 ? lo.x : axis == 1 ? lo.y : lo.z;
+                const float max = axis == 0 ? hi.x : axis == 1 ? hi.y : hi.z;
+                if (std::abs(dir) < .0001f) { assert(start >= min && start <= max); continue; }
+                float first = (min-start)/dir, last = (max-start)/dir;
+                if (first > last) std::swap(first,last);
+                enter = std::max(enter,first); leave = std::min(leave,last);
+            }
+            assert(enter <= leave); // finite native 48 HU ray + 18 HU hull reaches the victim
+            return;
+        }
+        if (local.origin.z <= 0.f) break;
+    }
+    assert(false && "reachable garden pass never produced a stable launch window");
+}
+
 int main()
 {
+    GardenPass(Body({0,0,130}, {300,0,-100}), Body({150,0,0}, {}, true));
+    GardenPass(Body({0,0,130}, {300,0,-100}), Body({150,0,0}, {0,60,0}, true));
+    GardenPass(Body({0,0,150}, {800,0,-100}), Body({350,0,0}, {}, true));
+    // Native smack time is strict, not rounded to the nearest Tick. The
+    // returned path index includes the current command's movement sample.
+    assert(ImpactSample(100, .015f, 1.5f + .2f) == 15);
+    assert(ImpactSample(100, .015f, float(114) * .015f) == 16);
+    assert(ImpactSample(100, .015f, 1.5f + .25f) == 18);
+    assert(ImpactSample(100, .015f, 1.4f) == 1);
+    assert(!ImpactSample(100, 0.f, 1.7f));
+    assert(!ImpactSample(100, .015f, std::numeric_limits<float>::quiet_NaN()));
+    Plan window; window.target = 0; window.hitTick = 14; window.windowTicks = 5; window.endTick = 18;
+    assert(!StableStrikeWindow(window, 14) && StableStrikeWindow(window, 15));
+    assert(StableStrikeWindow(window, 17) && !StableStrikeWindow(window, 18));
+    window.windowTicks = 1; assert(!StableStrikeWindow(window, 15));
+    const auto interior = InteriorPoint({100,100,100}, {-24,-24,0}, {24,24,82});
+    assert(interior.x == 21.f && interior.y == 21.f && interior.z == 79.f);
+    const auto tiny = InteriorPoint({100,0,0}, {-1,-1,0}, {1,1,2});
+    assert(tiny.x == 0.f && tiny.y == 0.f && tiny.z == 1.f);
+    assert(HullFallback(1.f, false, false));
+    assert(!HullFallback(.5f, false, false)); // a ray hitting a wall/player already owns the strike
+    assert(!HullFallback(1.f, true, false));
     // A hit confirmation never cancels the windup; a miss needs an observed
     // completed swing and an acknowledgment window. A denied request cancels.
     SwingTracker swing;
@@ -104,6 +185,9 @@ int main()
     assert(Accelerate({300,0,0}, {1,0,0}, settings).x == 300.f);
     solve();
     assert(plan.target == 0 && plan.hitTick >= settings.strikeTick);
+    Plan insufficientWindow;
+    solver.Solve(local, targets, 1, settings, TraceWorld, &world, -1, insufficientWindow, {}, MaxTicks);
+    assert(insufficientWindow.target == -1); // an unusable graze must not reserve the nearest victim
     const auto hit = plan.path[plan.hitTick];
     assert(plan.windowTicks > 0 && plan.endTick == plan.hitTick + plan.windowTicks - 1);
     assert(SeparatedXY(Body(hit.local), Body(hit.target)));

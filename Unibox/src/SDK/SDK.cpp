@@ -950,6 +950,8 @@ int SDK::IsAttacking(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, const CUserCmd* 
 		}
 		}
 
+		if (pWeapon->GetWeaponID() == TF_WEAPON_SHOVEL && uint16_t(pWeapon->m_iItemDefinitionIndex()) == Soldier_t_TheMarketGardener)
+			return pWeapon->m_flSmackTime() > 0.f && flTickBase > pWeapon->m_flSmackTime();
 		return TIME_TO_TICKS(pWeapon->m_flSmackTime()) == iTickBase - 1;
 	}
 

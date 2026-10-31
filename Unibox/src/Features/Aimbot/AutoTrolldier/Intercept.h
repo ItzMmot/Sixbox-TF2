@@ -168,7 +168,7 @@ namespace Trolldier
 
 	public:
 		void Solve(const Actor& local, const std::array<Actor, MaxTargets>& targets, int count,
-			const Settings& s, TraceFn fn, void* context, int previous, Plan& result, Vector previousSide = {})
+			const Settings& s, TraceFn fn, void* context, int previous, Plan& result, Vector previousSide = {}, int minimumWindow = 1)
 		{
 			result.target = -1; result.hitTick = result.windowTicks = result.endTick = 0; result.traces = 0; result.wish = {}; m_traces = 0;
 			result.side = {};
@@ -247,7 +247,13 @@ namespace Trolldier
 						const int goal = std::max(goalTick, tick);
 						Vector delta = m_target[goal].origin + offset - a.origin;
 						delta.z = 0.f;
-						const Vector desired = delta * (1.f / std::max((goal - tick + 1) * s.interval, 0.08f));
+						const float remaining = (goal - tick + 1) * s.interval;
+						Vector targetVelocity = m_target[goal].velocity; targetVelocity.z = 0.f;
+						// Keep following the victim when the final approach is damped.
+						// Dividing the entire future-position delta by 80 ms also
+						// damped its velocity, causing late braking on moving targets.
+						const Vector desired = targetVelocity
+							+ (delta - targetVelocity * remaining) * (1.f / std::max(remaining, 0.08f));
 						const Vector wish = ChooseWish(a.velocity, desired, s);
 						if (tick == 1) firstWish = wish;
 						if (!Step(a, wish, true, -1, s, fn, context)) break;
@@ -271,7 +277,7 @@ namespace Trolldier
 					// a one-Tick difference. Blocked paths receive no bonus at all.
 					const int rank = bestLength + (retainSide && offset.Dot(previousSide) > 0.f ? 2 : 0);
 					const int oldRank = result.windowTicks + (retainSide && result.target == target && result.side.Dot(previousSide) > 0.f ? 2 : 0);
-					if (bestLength && (score < bestScore || (score == bestScore
+					if (bestLength >= std::clamp(minimumWindow, 1, MaxTicks) && (score < bestScore || (score == bestScore
 						&& (rank > oldRank || (rank == oldRank && bestStart < result.hitTick)))))
 					{
 						bestScore = score; result.target = target; result.hitTick = bestStart; result.windowTicks = bestLength;
