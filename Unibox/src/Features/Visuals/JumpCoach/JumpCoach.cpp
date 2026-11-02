@@ -22,6 +22,7 @@ namespace
 }
 void CJumpCoach::Reset()
 {
+    ++m_generation;
     m_display.Set({});m_owner.Term();m_command=-1;m_side=1;
     m_airborne=false;m_takeoffSpeed=m_peakSpeed=m_airStart=m_lastGroundSpeed=m_efficiency=0;
 }
@@ -71,6 +72,8 @@ void CJumpCoach::Update(CTFPlayer* local,CTFWeaponBase* weapon,const CUserCmd* c
     else if(G::OriginalCmd.sidemove<-1) m_side=1;
     else if(G::OriginalCmd.mousedx) m_side=G::OriginalCmd.mousedx>0?-1:1;
     Display display;
+    display.generation=m_generation;
+    display.smoothing=std::isfinite(PathSmoothing.Value)?std::clamp(PathSmoothing.Value,0.f,1.f):0.f;
     display.active=true;display.grounded=local->IsOnGround();display.origin=Native(body.origin);display.side=m_side;
     display.speed=body.velocity.Horizontal();display.vertical=body.velocity.z;
     display.showHUD=Vars::Misc::Movement::JumpCoach::DrawHUD.Value;display.showStrafe=StrafeHints.Value;display.landingMarker=DrawLanding.Value;
@@ -120,6 +123,11 @@ void CJumpCoach::Update(CTFPlayer* local,CTFWeaponBase* weapon,const CUserCmd* c
             JumpCoach::Predict(body,{},0,m_physics,ticks,(std::max)(0,budget-m_plan.traces),Trace,local,true,m_side,m_ideal);
             display.idealCount=m_ideal.count;
             for(int i=0;i<display.idealCount;++i) display.ideal[i]=Native(m_ideal.points[i].origin);
+            if(m_ideal.end==JumpCoach::End::Landed)
+            {
+                display.idealLanded=true;
+                display.idealLanding=Native(m_ideal.landing);display.idealNormal=Native(m_ideal.normal);
+            }
         }
     }
     if(RocketTiming.Value) RocketAdvice(local,weapon,cmd,body,display);
@@ -242,7 +250,13 @@ void CJumpCoach::RocketAdvice(CTFPlayer* local,CTFWeaponBase* weapon,const CUser
 void CJumpCoach::RenderWorld()
 {
     const auto data=m_display.Get();
-    if(!data.active || GetTickCount64()>data.expires || SDK::CleanScreenshot() || I::EngineVGui->IsGameUIVisible()) return;
+    const uint64_t now=GetTickCount64();
+    if(!data.active || now>data.expires || SDK::CleanScreenshot() || I::EngineVGui->IsGameUIVisible())
+    {m_renderTime=0;m_renderPath.Clear();m_renderIdeal.Clear();return;}
+    const bool reset=!m_renderTime || now<m_renderTime || now-m_renderTime>250
+        || data.generation!=m_renderGeneration || data.end!=m_renderEnd || data.horizon!=m_renderHorizon;
+    const float elapsed=reset?0.f:float(now-m_renderTime)*.001f;
+    m_renderTime=now;m_renderGeneration=data.generation;m_renderEnd=data.end;m_renderHorizon=data.horizon;
     auto path=[&](const auto& points,int count,Color_t color,bool dashed) {
         const int stride=(std::max)(1,(count+126)/128);
         int previous=0,segment=0;
@@ -254,20 +268,35 @@ void CJumpCoach::RenderWorld()
         }
     };
     Color_t faint=data.color;faint.a=uint8_t(faint.a*.35f);
-    path(data.ideal,data.idealCount,faint,true);path(data.path,data.count,data.color,false);
-    if(data.end==JumpCoach::End::Landed && data.landingMarker)
+    if(data.smoothing>0.f)
     {
-        const Vec3 normal=data.normal;
+        m_renderPath.Update(data.path,data.count,data.origin,elapsed,data.smoothing,reset);
+        m_renderIdeal.Update(data.ideal,data.idealCount,data.origin,elapsed,data.smoothing,reset);
+        path(m_renderIdeal.points,m_renderIdeal.count,faint,true);
+        path(m_renderPath.points,m_renderPath.count,data.color,false);
+    }
+    else
+    {
+        m_renderPath.Clear();m_renderIdeal.Clear();
+        path(data.ideal,data.idealCount,faint,true);path(data.path,data.count,data.color,false);
+    }
+    auto landingRing=[&](const Vec3& landing,const Vec3& normal,Color_t color,bool dashed) {
         Vec3 right=normal.Cross(std::abs(normal.z)>.99f?Vec3(0,1,0):Vec3(0,0,1));right.Normalize();
-        const Vec3 up=normal.Cross(right),centre=data.landing+normal*1.5f;
+        const Vec3 up=normal.Cross(right),centre=landing+normal*1.5f;
         for(int i=0;i<32;++i)
         {
+            if(dashed && (i&1)) continue;
             const float a=i*JumpCoach::Pi/16.f,b=(i+1)*JumpCoach::Pi/16.f;
             H::Draw.RenderLine(centre+(right*std::cos(a)+up*std::sin(a))*data.markerRadius,
-                centre+(right*std::cos(b)+up*std::sin(b))*data.markerRadius,data.color,data.depth);
+                centre+(right*std::cos(b)+up*std::sin(b))*data.markerRadius,color,data.depth);
         }
-        H::Draw.RenderLine(centre-right*7,centre+right*7,data.color,data.depth);
-        H::Draw.RenderLine(centre-up*7,centre+up*7,data.color,data.depth);
+        H::Draw.RenderLine(centre-right*7,centre+right*7,color,data.depth);
+        H::Draw.RenderLine(centre-up*7,centre+up*7,color,data.depth);
+    };
+    if(data.landingMarker)
+    {
+        if(data.idealLanded) landingRing(data.idealLanding,data.idealNormal,faint,true);
+        if(data.end==JumpCoach::End::Landed) landingRing(data.landing,data.normal,data.color,false);
     }
     if(data.showShot)
     {

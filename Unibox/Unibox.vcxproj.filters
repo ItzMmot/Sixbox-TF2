@@ -494,6 +494,7 @@
     <ClInclude Include="src\Features\Visuals\Aura\AuraTexture.h" />
     <ClInclude Include="src\Features\Visuals\JumpCoach\JumpCoach.h" />
     <ClInclude Include="src\Features\Visuals\JumpCoach\CoachPolicy.h" />
+    <ClInclude Include="src\Features\Visuals\JumpCoach\PathSmoothing.h" />
     <ClInclude Include="src\Features\Visuals\Aura\AuraBytecode.h" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\SkinChanger.h" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\SkinData.h" />

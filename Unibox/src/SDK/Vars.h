@@ -859,6 +859,7 @@ NAMESPACE_BEGIN(Vars)
                 CVar(MinimumSpeed, "Coach strafe minimum speed", 100.f, VISUAL | SLIDER_CLAMP, 20.f, 400.f, 10.f, "%g HU/s");
                 CVar(DrawPath, "Coach flight path", true, VISUAL);
                 CVar(DrawIdeal, "Coach optimal strafe path", true, VISUAL);
+                CVar(PathSmoothing, "Coach path smoothing", .5f, VISUAL | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .01f);
                 CVar(DrawLanding, "Coach landing marker", true, VISUAL);
                 CVar(StrafeHints, "Coach strafe hints", true, VISUAL);
                 CVar(RocketTiming, "Coach rocket timing", true, VISUAL);

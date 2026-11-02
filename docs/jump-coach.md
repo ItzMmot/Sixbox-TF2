@@ -17,9 +17,12 @@ when Auto RJ owns a launch, its rocket advice yields to that launch.
 - **Dashed path:** a reference path that continually applies the indicated
   optimal A/D strafe. This maximizes immediate horizontal speed gain, not route
   progress or distance from obstacles. It does not select a destination.
-- **Landing ring:** estimated floor contact and approximate hull footprint. It
-  is drawn only after a standable collision or ground probe; a truncated path
-  does not produce a fictional landing marker.
+- **Landing rings:** estimated floor contacts and approximate hull footprints
+  for both predictions. The main prediction uses a solid ring; the optimal
+  strafe prediction uses a faint dashed ring, matching its path. Each ring is
+  drawn independently, only after its prediction finds a standable collision
+  or ground probe; truncated paths do not produce fictional landing markers.
+  The Landing marker toggle controls both rings.
 - **Speed / Vz:** observed horizontal and vertical speed in Source HU/s.
 - **Launch:** horizontal speed change from the last observed grounded speed
   (or the first airborne sample if enabled mid-flight).
@@ -39,6 +42,14 @@ velocity rather than invented while grounded. HUD position is a percentage of
 the screen, and its scale/colour are configurable. The existing custom client
 font is used; long labels are ellipsized without creating new font sizes per
 frame. World lines obey depth unless Path through walls is enabled.
+
+**Path smoothing** is the only smoothing control: 0 disables it, 1 gives the
+smoothest response (250 ms time constant), and the default is 0.5. It filters
+both world paths on the render thread, independently of frame rate, while
+keeping their start attached to the player. More smoothing adds visual delay
+when changing strafe direction. History is discarded on reset, teleport,
+visibility gaps and prediction end-state/horizon changes. The physics, HUD
+values, exact landing marker and rocket advice always use the raw prediction.
 
 ## Rocket timing
 

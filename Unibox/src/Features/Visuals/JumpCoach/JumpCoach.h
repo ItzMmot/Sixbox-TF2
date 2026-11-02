@@ -2,6 +2,7 @@
 #include "../../../SDK/SDK.h"
 #ifndef TEXTMODE
 #include "CoachPolicy.h"
+#include "PathSmoothing.h"
 #include "../../ImGui/IndicatorCache.h"
 
 class CJumpCoach
@@ -12,18 +13,26 @@ class CJumpCoach
         std::array<Vec3,JumpCoach::MaxTicks+1> path{},ideal{};
         int count=0,idealCount=0;
         JumpCoach::End end=JumpCoach::End::Invalid;
-        Vec3 origin,landing,normal,shotPoint,wish;
+        Vec3 origin,landing,normal,idealLanding,idealNormal,shotPoint,wish;
         float speed=0,vertical=0,launchGain=0,peakLoss=0,airtime=0;
         float landTime=0,landSpeed=0,landDistance=0,turn=0,efficiency=0,shotDelay=0;
+        float smoothing=.5f;
+        uint64_t generation=0;
         float horizon=3,hudX=50,hudY=70,scale=1,markerRadius=24;
         Color_t color={122,132,229,220};
         RocketState rocket=RocketState::Hidden;
         uint64_t expires=0;
         bool active=false,grounded=false,guide=false,automated=false,showHUD=true,depth=true,landingMarker=true;
-        bool showShot=false,showStrafe=true;
+        bool showShot=false,showStrafe=true,idealLanded=false;
         int side=1;
     };
     CIndicatorCache<Display> m_display;
+    uint64_t m_generation=0; // Written only by the game thread, copied into snapshots.
+    // Render-thread-owned history; Reset never touches these buffers.
+    JumpCoach::SmoothedPath<Vec3> m_renderPath,m_renderIdeal;
+    uint64_t m_renderTime=0,m_renderGeneration=0;
+    JumpCoach::End m_renderEnd=JumpCoach::End::Invalid;
+    float m_renderHorizon=0;
     JumpCoach::Plan m_plan,m_ideal;
     JumpCoach::Physics m_physics;
     CHandle<CTFPlayer> m_owner;

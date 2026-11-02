@@ -1047,6 +1047,7 @@ static void MiscMain()
             FSlider(JumpCoach::TraceBudget);
             FToggle(JumpCoach::DrawPath);
             FToggle(JumpCoach::DrawIdeal);
+            FSlider(JumpCoach::PathSmoothing);
             FToggle(JumpCoach::DrawLanding);
             FToggle(JumpCoach::ThroughWalls);
             FToggle(JumpCoach::StrafeHints);
