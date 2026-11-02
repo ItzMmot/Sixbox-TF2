@@ -2,19 +2,21 @@ name: Release FreeType AVX2
 
 on:
   push:
+    branches: [master]
     tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing version tag to release (for example v1.0.0)'
-        required: true
+        description: 'Existing version tag (for example v1.0.0); leave empty for a master nightly build'
+        required: false
+        default: ''
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-freetype-avx2-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: release-freetype-avx2-${{ github.event_name == 'workflow_dispatch' && inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'nightly') }}
   cancel-in-progress: false
 
 jobs:
@@ -27,18 +29,26 @@ jobs:
       run:
         shell: pwsh
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'nightly') }}
       RELEASE_NAME: Sixboxx64ReleaseFreetypeAVX2
 
     steps:
-      - name: Check out release tag
+      - name: Check out build source
         uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_TAG == 'nightly' && github.sha || format('refs/tags/{0}', env.RELEASE_TAG) }}
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Validate nightly branch
+        if: env.RELEASE_TAG == 'nightly'
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/master') {
+            throw 'Nightly builds must run from master.'
+          }
+
       - name: Validate release tag
+        if: env.RELEASE_TAG != 'nightly'
         run: |
           if ($env:RELEASE_TAG -notmatch '^v[0-9][0-9A-Za-z._+-]*$') {
             throw 'Use a version tag such as v1.0.0 or v1.0.0-rc.1.'
@@ -88,6 +98,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release
+        if: env.RELEASE_TAG != 'nightly'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -102,3 +113,46 @@ jobs:
             gh release create $env:RELEASE_TAG @assets @options
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+
+      - name: Publish rolling nightly release
+        if: env.RELEASE_TAG == 'nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # A queued old build must never replace a newer master build.
+          $head = gh api "repos/$env:GH_REPO/git/ref/heads/master" --jq '.object.sha'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read master HEAD.' }
+          if ($head -ne $env:GITHUB_SHA) {
+            Write-Host 'Master advanced during this build; keeping artifacts and skipping nightly publication.'
+            exit 0
+          }
+
+          $tagCount = gh api "repos/$env:GH_REPO/git/matching-refs/tags/nightly" --jq '[.[] | select(.ref == "refs/tags/nightly")] | length'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check the nightly tag.' }
+          if ([int]$tagCount -gt 0) {
+            gh api --method PATCH "repos/$env:GH_REPO/git/refs/tags/nightly" -f "sha=$env:GITHUB_SHA" -F force=true
+          } else {
+            gh api --method POST "repos/$env:GH_REPO/git/refs" -f ref=refs/tags/nightly -f "sha=$env:GITHUB_SHA"
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not update the nightly tag.' }
+
+          $notes = Join-Path $env:RUNNER_TEMP 'nightly-notes.md'
+          @"
+          Automatically built from master. This is a development build.
+
+          Commit: $env:GITHUB_SHA
+          Build: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+
+          Download Sixboxx64ReleaseFreetypeAVX2.dll below. Third-party licenses and SHA256 checksums are included.
+          "@ | Set-Content $notes -Encoding utf8
+          $assets = @(Get-ChildItem output/release -File | ForEach-Object FullName)
+          gh release view nightly *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload nightly @assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Nightly asset upload failed.' }
+            gh release edit nightly --title 'Sixbox TF2 Nightly (FreeType AVX2)' --notes-file $notes --prerelease --latest=false
+          } else {
+            gh release create nightly @assets --verify-tag --title 'Sixbox TF2 Nightly (FreeType AVX2)' --notes-file $notes --prerelease --latest=false
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Nightly release publication failed.' }
