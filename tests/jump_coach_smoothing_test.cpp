@@ -12,6 +12,22 @@ int main()
 {
     const std::array<Vector,2> initial{{{0,0,0},{100,0,0}}};
     const std::array<Vector,2> turn{{{0,0,0},{100,100,0}}};
+    JumpCoach::SmoothedLanding<Vector> marker;
+    marker.Update({100,0,0},{0,0,1},0,1,true);
+    for(int i=0;i<120;++i)
+        marker.Update({100,i%2?100.f:-100.f,0},{0,0,1},1.f/120.f,1,false);
+    assert(std::abs(marker.point.y)<3.f); // Raw alternating endpoints are +/-100.
+    assert(Near(marker.point.z,0));
+    marker.Update({100,80,0},{0,0,1},.015f,0,false);
+    assert(Near(marker.point.y,80)); // Slider zero disables marker smoothing too.
+    marker.Update({200,20,80},{0,0,1},.015f,1,false);
+    assert(Near(marker.point.x,200)&&Near(marker.point.z,80)); // New floor resets.
+    marker.Clear();assert(!marker.valid);
+    Path anchored;
+    anchored.Update(initial,2,{},0,1,true,true);
+    const std::array<Vector,2> fixedLanding{{{10,0,0},{100,0,0}}};
+    anchored.Update(fixedLanding,2,{10,0,0},.015f,1,false,true);
+    assert(Near(anchored.points.back().x,100)); // World landing is not moved with owner.
     Path slow,fast;
     slow.Update(initial,2,{},0,1,true);fast=slow;
     for(int i=0;i<30;++i) slow.Update(turn,2,{},1.f/30,1,false);

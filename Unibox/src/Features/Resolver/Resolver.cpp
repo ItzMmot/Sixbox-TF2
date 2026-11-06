@@ -20,9 +20,8 @@ void CResolver::Reset()
 	m_mResolverData.clear();
 	m_mSniperDots.clear();
 
-	m_iWaitingForTarget = -1;
-	m_flWaitingForDamage = 0.f;
-	m_bWaitingForHeadshot = false;
+	m_shots.Clear();m_hShotOwner.Term();BeginCommand();
+	for(auto& state:m_aAnimation) state={};
 }
 
 void CResolver::StoreSniperDots(CTFPlayerResource* pResource)
@@ -52,8 +51,220 @@ std::optional<float> CResolver::GetPitchForSniperDot(CTFPlayer* pEntity, CTFPlay
 	return std::nullopt;
 }
 
+bool CResolver::UsesAnimationReplay(CTFPlayer* player) const
+{
+	return !G::Unload && player && I::EngineClient->IsInGame() && Vars::Resolver::AnimationHypotheses.Value
+		&& (Vars::Resolver::Enabled.Value || Vars::Visuals::Removals::Interpolation.Value)
+		&& !I::EngineClient->IsPlayingDemo() && player->entindex()!=I::EngineClient->GetLocalPlayer()
+		&& player->IsAlive() && !player->IsDormant() && !player->IsAGhost() && !player->InCond(TF_COND_TAUNTING)
+		&& player->m_PlayerAnimState() && player->m_nSequence()>=0;
+}
+
+void CResolver::DiscardAnimation(CTFPlayer* player)
+{
+	if (!player) return;
+	const int index=player->entindex();
+	if (index>0 && index<int(m_aAnimation.size()))
+	{
+		auto& state=m_aAnimation[index];const auto identity=state.identity;state={};
+		if (identity.handle==player->As<IHandleEntity>()->GetRefEHandle().ToInt() && identity.spawn==player->m_iSpawnCounter())
+		{state.identity=identity;state.player.Set(player);}
+	}
+}
+
+AnimationTimeline::Identity CResolver::AnimationIdentity(CTFPlayer* player) const
+{
+	if (!player) return {};
+	const int index=player->entindex();
+	if (index<=0 || index>=int(m_aAnimation.size())) return {};
+	const auto& state=m_aAnimation[index];
+	return state.player.Get()==player && state.identity.handle==player->As<IHandleEntity>()->GetRefEHandle().ToInt()
+		&& state.identity.spawn==player->m_iSpawnCounter() ? state.identity : AnimationTimeline::Identity{};
+}
+
+void CResolver::InvalidateIdentity(CTFPlayer* player)
+{
+	if (!player) return;
+	const int index=player->entindex();
+	if (index<=0 || index>=int(m_aAnimation.size())) return;
+	auto& state=m_aAnimation[index];
+	if (++m_iNextRevision==0) ++m_iNextRevision;
+	state.identity.revision=m_iNextRevision;
+	state.identity.handle=player->As<IHandleEntity>()->GetRefEHandle().ToInt();state.identity.spawn=player->m_iSpawnCounter();
+	state.identity.hypothesis=state.active;state.player.Set(player);
+}
+
+bool CResolver::QueueAnimationEvent(CTFPlayer* player,PlayerAnimEvent_t event,int data)
+{
+	if (!UsesAnimationReplay(player) || G::UpdatingAnims) return false;
+	const int index=player->entindex();
+	if (index<=0 || index>=int(m_aAnimation.size()) || event<0 || event>=PLAYERANIMEVENT_COUNT) return false;
+	auto& state=m_aAnimation[index];
+	if (state.player.Get()!=player) {state={};state.player.Set(player);}
+	if (state.eventCount==int(state.events.size()))
+	{
+		// Lose continuity rather than partially replay an overflowing packet.
+		state.overflow=true;state.eventCount=0;
+	}
+	state.events[state.eventCount++]={event,data,TIME_TO_TICKS(player->m_flSimulationTime())};
+	return true;
+}
+
+bool CResolver::ReconstructAnimation(CTFPlayer* player)
+{
+	if (!UsesAnimationReplay(player)) {DiscardAnimation(player);return false;}
+	const int index=player->entindex();
+	if (index<=0 || index>=int(m_aAnimation.size())) return false;
+	auto* anim=player->m_PlayerAnimState();
+	if (!anim || !player->IsAlive() || player->IsDormant() || player->IsAGhost() || player->InCond(TF_COND_TAUNTING)
+		|| player->m_nSequence()<0) {DiscardAnimation(player);return false;}
+	if (I::Prediction->m_bEnginePaused) return true;
+	auto& state=m_aAnimation[index];
+	if (state.player.Get()!=player) {state={};state.player.Set(player);}
+	auto point=[](const Vec3& value){return AnimationTimeline::V{value.x,value.y,value.z};};
+	auto vector=[](AnimationTimeline::V value){return Vec3(value.x,value.y,value.z);};
+	AnimationTimeline::Observation current;
+	current.valid=true;current.tick=TIME_TO_TICKS(player->m_flSimulationTime());
+	current.origin=point(player->m_vecOrigin());current.mins=point(player->m_vecMins());current.maxs=point(player->m_vecMaxs());
+	current.velocity=point(player->GetAbsVelocity());current.angles={player->m_angEyeAnglesX(),player->m_angEyeAnglesY(),0};
+	current.handle=player->As<IHandleEntity>()->GetRefEHandle().ToInt();current.spawn=player->m_iSpawnCounter();
+	current.model=player->m_nModelIndex();current.playerClass=player->m_iClass();
+	if (auto* parent=player->GetMoveParent()) current.parent=parent->As<IHandleEntity>()->GetRefEHandle().ToInt();
+	current.interpolation=player->m_ubInterpolationFrame();current.scale=player->m_flModelScale();
+	current.flags=player->m_fFlags();current.water=player->m_nWaterLevel();
+	if (!AnimationTimeline::Valid(current)) {DiscardAnimation(player);return false;}
+	if (AnimationTimeline::SameLife(state.observed,current) && state.observed.tick==current.tick && !state.overflow)
+		return true;
+	const float gravity=SDK::GetGravity()*(player->m_flGravity()!=0?player->m_flGravity():1.f);
+	auto previous=state.observed;
+	if (state.overflow) previous.valid=false;
+	bool doubleJump=false;
+	for (int i=0;i<state.eventCount;++i)
+		doubleJump|=state.events[i].type==PLAYERANIMEVENT_DOUBLEJUMP||state.events[i].type==PLAYERANIMEVENT_DOUBLEJUMP_CROUCH;
+	auto timeline=AnimationTimeline::Build(previous,current,TICK_INTERVAL,gravity,-1,doubleJump);
+	if (timeline.count<=0) return false;
+	float resolvedYaw=current.angles.y,resolvedPitch=current.angles.x;
+	GetAngles(player,&resolvedYaw,&resolvedPitch);
+	if (!std::isfinite(resolvedYaw)) resolvedYaw=current.angles.y;
+	if (!std::isfinite(resolvedPitch)) resolvedPitch=current.angles.x;
+	const float yawOffset=Math::NormalizeAngle(resolvedYaw-current.angles.y);
+	const int candidate=(int(std::lround(yawOffset/45.f))+8)%8;
+	const bool bank=Vars::Resolver::Enabled.Value && Vars::Resolver::AutoResolve.Value
+		&&std::abs(Math::NormalizeAngle(yawOffset-candidate*45.f))<.01f;
+	const int selected=bank?candidate:-1;
+	if (!timeline.continuous || !state.pose.Restore(player))
+	{
+		timeline=AnimationTimeline::Build({},current,TICK_INTERVAL,gravity);
+		if (state.observed.valid && (state.observed.spawn!=current.spawn || state.observed.model!=current.model
+			|| state.observed.playerClass!=current.playerClass)) anim->ClearAnimationState();
+		player->m_flAnimTime()=TICKS_TO_TIME(current.tick-1);state.layerOrder={};
+		for (auto& feet:state.feet) feet={anim->m_flGoalFeetYaw,anim->m_flCurrentFeetYaw};
+		F::Backtrack.ResolverUpdate(player);
+	}
+	if (selected>=0)
+	{
+		anim->m_flGoalFeetYaw=state.feet[selected].goal;
+		anim->m_flCurrentFeetYaw=state.feet[selected].current;
+	}
+	if (state.active!=selected || !state.identity.Valid()) InvalidateIdentity(player);
+	state.active=selected;
+	state.identity.handle=current.handle;state.identity.spawn=current.spawn;state.identity.hypothesis=selected;
+	struct RestoreInputs
+	{
+		CTFPlayer* player;CGlobalVarsBase clock;bool updating;
+		Vec3 origin,absolute,velocity,absoluteVelocity,angles,mins,maxs,absoluteAngles;
+		int flags;byte water;bool ducked;EHANDLE ground;float simulationTime;
+		~RestoreInputs()
+		{
+			player->m_vecOrigin()=origin;player->SetAbsOrigin(absolute);
+			player->m_vecVelocity()=velocity;player->SetAbsVelocity(absoluteVelocity);
+			player->m_angEyeAnglesX()=angles.x;player->m_angEyeAnglesY()=angles.y;
+			player->m_vecMins()=mins;player->m_vecMaxs()=maxs;player->m_fFlags()=flags;
+			player->m_nWaterLevel()=water;player->m_bDucked()=ducked;player->m_hGroundEntity()=ground;
+			player->SetAbsAngles(absoluteAngles);player->m_flSimulationTime()=simulationTime;
+			*I::GlobalVars=clock;G::UpdatingAnims=updating;
+		}
+	} restore{player,*I::GlobalVars,G::UpdatingAnims,player->m_vecOrigin(),player->GetAbsOrigin(),player->m_vecVelocity(),
+		player->GetAbsVelocity(),{player->m_angEyeAnglesX(),player->m_angEyeAnglesY(),0},player->m_vecMins(),player->m_vecMaxs(),
+		player->GetAbsAngles(),player->m_fFlags(),player->m_nWaterLevel(),player->m_bDucked(),player->m_hGroundEntity(),player->m_flSimulationTime()};
+	G::UpdatingAnims=true;I::GlobalVars->frametime=TICK_INTERVAL;I::GlobalVars->interpolation_amount=0;
+	// Event packets identify the event, not its hidden command. Preserve their
+	// order, place unknown events at the first command and fit jump transitions.
+	for (int i=0;i<state.eventCount;++i)
+		if (state.events[i].type==PLAYERANIMEVENT_JUMP && timeline.jump<0)
+		{
+			timeline.jump=timeline.first;
+			if (current.flags&FL_ONGROUND) timeline.land=current.tick;
+		}
+	int earliest=timeline.first;
+	for (int i=0;i<state.eventCount;++i)
+	{
+		auto& event=state.events[i];
+		event.tick=earliest;
+		if (event.type==PLAYERANIMEVENT_JUMP && timeline.jump>=0) event.tick=(std::max)(earliest,timeline.jump);
+		else if ((event.type==PLAYERANIMEVENT_DOUBLEJUMP || event.type==PLAYERANIMEVENT_DOUBLEJUMP_CROUCH) && timeline.airDash>=0)
+			event.tick=std::clamp(timeline.airDash,earliest,current.tick);
+		earliest=event.tick;
+	}
+	int nextEvent=0;
+	for (int tick=timeline.first;tick<=current.tick;++tick)
+	{
+		state.layerOrder.BeginTick();
+		const auto sample=timeline.At(tick);const bool endpoint=tick==current.tick;
+		I::GlobalVars->curtime=TICKS_TO_TIME(tick);I::GlobalVars->tickcount=tick;
+		player->m_flSimulationTime()=TICKS_TO_TIME(tick);
+		player->m_vecOrigin()=vector(sample.origin);player->SetAbsOrigin(vector(sample.origin));
+		player->m_vecVelocity()=vector(sample.velocity);player->SetAbsVelocity(vector(sample.velocity));
+		player->m_fFlags()=sample.flags;player->m_nWaterLevel()=byte(sample.water);player->m_bDucked()=bool(sample.flags&FL_DUCKING);
+		player->m_vecMins()=vector(sample.mins);player->m_vecMaxs()=vector(sample.maxs);
+		if (!(sample.flags&FL_ONGROUND)) player->m_hGroundEntity().Term();
+		for (;nextEvent<state.eventCount && state.events[nextEvent].tick<=tick;++nextEvent)
+			anim->DoAnimationEvent(state.events[nextEvent].type,state.events[nextEvent].data);
+		const float yaw=endpoint?current.angles.y:Math::NormalizeAngle(sample.angles.y+yawOffset);
+		const float pitch=endpoint?resolvedPitch:sample.angles.x;
+		player->m_angEyeAnglesX()=pitch;player->m_angEyeAnglesY()=yaw;
+		const bool moving=AnimationTimeline::Length2(sample.velocity)>1.f;
+		for (int i=0;i<8;++i) state.feet[i].Step(endpoint?current.angles.y:sample.angles.y+i*45.f,TICK_INTERVAL,moving);
+		const float interval=std::clamp(I::GlobalVars->curtime-player->m_flAnimTime(),0.f,.2f);
+		if (interval>.001f) player->FrameAdvance(interval);
+		std::array<CAnimationLayer,GESTURE_SLOT_COUNT> before{};
+		const int layers=(std::min)(anim->m_aGestureSlots.Count(),int(before.size()));
+		for (int i=0;i<layers;++i) if (auto* layer=anim->m_aGestureSlots[i].m_pAnimLayer)
+		{
+			before[i]=*layer;
+			state.layerOrder.Observe(i,int(layer->m_nSequence),layer->m_flWeight>0);
+		}
+		anim->Update(yaw,pitch);
+		for (int i=0;i<layers;++i)
+		{
+			auto* layer=anim->m_aGestureSlots[i].m_pAnimLayer;
+			if (!layer) continue;
+			const int order=state.layerOrder.Observe(i,int(layer->m_nSequence),layer->m_flWeight>0,
+				layer->m_flCycle<before[i].m_flCycle);
+			if (layer->m_flWeight<=0) continue;
+			layer->m_nOrder=order;
+			if (before[i].m_flWeight<=0 || layer->m_nSequence!=before[i].m_nSequence || layer->m_flCycle<before[i].m_flCycle)
+				layer->m_flCycle=layer->m_flPrevCycle=0.f;
+			else if (interval>.001f)
+				layer->m_flCycle=(std::min)(float(before[i].m_flCycle)+(float(layer->m_flCycle)-float(before[i].m_flCycle))*interval/TICK_INTERVAL,1.f);
+		}
+	}
+	if (selected>=0) state.feet[selected]={anim->m_flGoalFeetYaw,anim->m_flCurrentFeetYaw};
+	state.pose.Store(player);state.observed=current;state.eventCount=0;state.overflow=false;
+	// LATCH_ANIMATION_VAR: preserve the reconstructed sequence/poses through
+	// the next PreDataUpdate, rather than restoring the old interpolation copy.
+	player->OnLatchInterpolatedVariables(1);player->InvalidateBoneCache();
+	return true;
+}
+
 void CResolver::FrameStageNotify()
 {
+	if(!Vars::Resolver::AnimationHypotheses.Value || (!Vars::Resolver::Enabled.Value&&!Vars::Visuals::Removals::Interpolation.Value))
+		for(auto& state:m_aAnimation)
+		{
+			state.observed={};state.pose.valid=false;state.eventCount=0;state.overflow=false;state.active=-1;state.layerOrder={};
+		}
+
 	if (!Vars::Resolver::Enabled.Value || !I::EngineClient->IsInGame() || I::EngineClient->IsPlayingDemo())
 		return;
 
@@ -93,41 +304,55 @@ void CResolver::FrameStageNotify()
 	}
 }
 
+void CResolver::CycleMiss(int userID)
+{
+	if(auto* pTarget=GetPlayerForUserID(userID);pTarget&&pTarget->IsAlive()&&!pTarget->IsDormant())
+	{
+		auto& tData = m_mResolverData[userID];
+
+		float& flYaw = tData.m_flYaw;
+		float& flPitch = tData.m_flPitch;
+		bool bAutoYaw = tData.m_bAutoSetYaw && Vars::Resolver::AutoResolveYawAmount.Value;
+		bool bAutoPitch = tData.m_bAutoSetPitch && Vars::Resolver::AutoResolvePitchAmount.Value;
+
+		if (bAutoPitch && fabsf(pTarget->m_angEyeAnglesX()) == 90.f && !m_mSniperDots.contains(userID)
+			&& (!bAutoYaw || sign(flYaw) != sign(flYaw + Vars::Resolver::AutoResolveYawAmount.Value) && sign(flYaw) != 0))
+		{
+			flPitch = Math::ClampNormalizeAngle(flPitch + Vars::Resolver::AutoResolvePitchAmount.Value, 90.f);
+
+			F::Backtrack.ResolverUpdate(pTarget);
+			F::Output.ReportResolver(I::EngineClient->GetPlayerForUserID(userID), "Cycling", "pitch", flPitch);
+		}
+
+		if (bAutoYaw)
+		{
+			flYaw = Math::NormalizeAngle(flYaw + Vars::Resolver::AutoResolveYawAmount.Value);
+
+			F::Backtrack.ResolverUpdate(pTarget);
+			F::Output.ReportResolver(I::EngineClient->GetPlayerForUserID(userID), "Cycling", "yaw", flYaw);
+		}
+
+	}
+}
+
 void CResolver::CreateMove()
 {
-	if (m_iWaitingForTarget != -1 && m_flWaitingForDamage < I::GlobalVars->curtime)
-	{
-		if (auto pTarget = GetPlayerForUserID(m_iWaitingForTarget))
-		{
-			auto& tData = m_mResolverData[m_iWaitingForTarget];
-
-			float& flYaw = tData.m_flYaw;
-			float& flPitch = tData.m_flPitch;
-			bool bAutoYaw = tData.m_bAutoSetYaw && Vars::Resolver::AutoResolveYawAmount.Value;
-			bool bAutoPitch = tData.m_bAutoSetPitch && Vars::Resolver::AutoResolvePitchAmount.Value;
-
-			if (bAutoPitch && fabsf(pTarget->m_angEyeAnglesX()) == 90.f && !m_mSniperDots.contains(m_iWaitingForTarget)
-				&& (!bAutoYaw || sign(flYaw) != sign(flYaw + Vars::Resolver::AutoResolveYawAmount.Value) && sign(flYaw) != 0))
-			{
-				flPitch = Math::ClampNormalizeAngle(flPitch + Vars::Resolver::AutoResolvePitchAmount.Value, 90.f);
-
-				F::Backtrack.ResolverUpdate(pTarget);
-				F::Output.ReportResolver(I::EngineClient->GetPlayerForUserID(m_iWaitingForTarget), "Cycling", "pitch", flPitch);
-			}
-
-			if (bAutoYaw)
-			{
-				flYaw = Math::NormalizeAngle(flYaw + Vars::Resolver::AutoResolveYawAmount.Value);
-
-				F::Backtrack.ResolverUpdate(pTarget);
-				F::Output.ReportResolver(I::EngineClient->GetPlayerForUserID(m_iWaitingForTarget), "Cycling", "yaw", flYaw);
-			}
-
-			m_iWaitingForTarget = -1;
-			m_flWaitingForDamage = 0.f;
-			m_bWaitingForHeadshot = false;
-		}
-	}
+	auto* local=H::Entities.GetLocal();
+	if(!Vars::Resolver::Enabled.Value||!local||!local->IsAlive()||I::EngineClient->IsPlayingDemo())
+	{m_shots.Clear();m_hShotOwner.Term();return;}
+	if(m_hShotOwner.Get()!=local) {m_shots.Clear();m_hShotOwner.Set(local);}
+	std::array<int,128> cycled{};int count=0;
+	if (!Vars::Resolver::AutoResolve.Value) m_shots.Clear();
+	m_shots.ExpireDetailed(I::GlobalVars->curtime,I::ClientState->command_ack,[&](const AimPolicy::PendingShot& shot) {
+		const int userID=shot.target;
+		auto* target=GetPlayerForUserID(userID);
+		if (!target || (Vars::Resolver::AutoResolveHeadshotOnly.Value&&!shot.head)
+			|| (Vars::Resolver::AutoResolveCheatersOnly.Value&&!F::PlayerUtils.HasTag(target->entindex(),CHEATER_TAG))) return;
+		const AnimationTimeline::Identity expected{shot.revision,shot.entity,shot.spawn,shot.hypothesis};
+		if (!AnimationTimeline::FeedbackApplies(expected,AnimationIdentity(GetPlayerForUserID(userID)))) return;
+		for(int i=0;i<count;++i) if(cycled[i]==userID) return;
+		if(count<int(cycled.size())) {cycled[count++]=userID;CycleMiss(userID);}
+	});
 
 	if (!Vars::Resolver::Enabled.Value)
 		return;
@@ -260,7 +485,7 @@ void CResolver::CreateMove()
 		m_flLastViewCycle = 0.f;
 }
 
-void CResolver::HitscanRan(CTFPlayer* pLocal, CTFPlayer* pTarget, CTFWeaponBase* pWeapon, int nHitbox)
+void CResolver::HitscanRan(CTFPlayer* pLocal, CTFPlayer* pTarget, CTFWeaponBase* pWeapon, int nHitbox,const TickRecord* record)
 {
 	if (!Vars::Resolver::Enabled.Value || !Vars::Resolver::AutoResolve.Value
 		|| Vars::Aimbot::General::AimType.Value == Vars::Aimbot::General::AimTypeEnum::Smooth
@@ -286,34 +511,43 @@ void CResolver::HitscanRan(CTFPlayer* pLocal, CTFPlayer* pTarget, CTFWeaponBase*
 	if (!pResource)
 		return;
 
-	m_iWaitingForTarget = pResource->m_iUserID(pTarget->entindex());
-	m_flWaitingForDamage = I::GlobalVars->curtime + F::Backtrack.GetReal(MAX_FLOWS, false) * 1.5f + 0.1f;
-	if (nHitbox == HITBOX_HEAD && G::CanHeadshot)
-	{
-		// not dealing with ambassador's range check right now
-		switch (pWeapon->GetWeaponID())
-		{
-		case TF_WEAPON_SNIPERRIFLE:
-		case TF_WEAPON_SNIPERRIFLE_DECAP:
-		case TF_WEAPON_SNIPERRIFLE_CLASSIC:
-			m_bWaitingForHeadshot = true;
-		}
-	}
+	if(!G::CurrentUserCmd) return;
+	if(m_hShotOwner.Get()!=pLocal) {m_shots.Clear();m_hShotOwner.Set(pLocal);}
+	const bool head=nHitbox==HITBOX_HEAD&&G::CanHeadshot;
+	const float deadline=I::GlobalVars->curtime+F::Backtrack.GetReal(MAX_FLOWS,false)*1.5f+.1f;
+	if (!AnimationIdentity(pTarget).Valid()) InvalidateIdentity(pTarget);
+	const auto identity=record && record->m_tResolverIdentity.Valid()?record->m_tResolverIdentity:AnimationIdentity(pTarget);
+	m_preparedShot={pResource->m_iUserID(pTarget->entindex()),pWeapon->GetWeaponID(),G::CurrentUserCmd->command_number,deadline,head,
+		identity.handle,identity.spawn,identity.hypothesis,identity.revision};
+	m_hPreparedWeapon.Set(pWeapon);m_iPreparedCommand=G::OriginalCmd.command_number;
 }
 
-void CResolver::PlayerHurt(IGameEvent* pEvent)
+void CResolver::BeginCommand()
 {
-	if (m_iWaitingForTarget == -1
-		|| I::EngineClient->GetPlayerForUserID(pEvent->GetInt("attacker")) != I::EngineClient->GetLocalPlayer()
-		|| pEvent->GetInt("userid") != m_iWaitingForTarget)
-		return;
+	m_preparedShot={};m_hPreparedWeapon.Term();m_iPreparedCommand=-1;
+}
 
-	if (m_bWaitingForHeadshot && !pEvent->GetBool("crit"))
-		return;
+void CResolver::CommitShot(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* command)
+{
+	// CritHack may replace the command number, and later movement/compatibility
+	// features may cancel attack. Record only the final command that will fire.
+	if (m_preparedShot.target && m_iPreparedCommand==G::OriginalCmd.command_number
+		&& local && local==m_hShotOwner.Get() && weapon && weapon==m_hPreparedWeapon.Get()
+		&& SDK::IsAttacking(local,weapon,command)==1)
+	{
+		m_preparedShot.command=command->command_number;
+		m_shots.Add(m_preparedShot);
+	}
+	BeginCommand();
+}
 
-	m_iWaitingForTarget = -1;
-	m_flWaitingForDamage = 0.f;
-	m_bWaitingForHeadshot = false;
+void CResolver::PlayerHurt(IGameEvent* event)
+{
+	if(!event||!Vars::Resolver::Enabled.Value
+		||I::EngineClient->GetPlayerForUserID(event->GetInt("attacker"))!=I::EngineClient->GetLocalPlayer()) return;
+	const int custom=event->GetInt("custom");
+	const bool head=custom==TF_DMG_CUSTOM_HEADSHOT||custom==TF_DMG_CUSTOM_HEADSHOT_DECAPITATION;
+	m_shots.Hit(event->GetInt("userid"),event->GetInt("weaponid"),head);
 }
 
 void CResolver::SetYaw(int iUserID, float flValue, bool bAuto)

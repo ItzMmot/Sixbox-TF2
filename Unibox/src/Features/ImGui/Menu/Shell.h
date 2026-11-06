@@ -275,9 +275,19 @@ namespace Shell
 			sSearch.clear();
 		};
 
+#ifndef TEXTMODE
+		const int imageArea=F::MenuBackground.Area();
+		if(imageArea==2) F::MenuBackground.Draw(GetBackgroundDrawList(),{0,0},vDisplay,tShell.m_flAnim);
+		pDrawList->AddRectFilled(vDrawPos, vDrawPos + vWindowSize, imageArea==2?F::MenuBackground.PanelColor(F::Render.Background1):ImU32(F::Render.Background1), flRounding);
+		if(imageArea!=2) F::MenuBackground.Draw(pDrawList,vDrawPos+ImVec2(imageArea==1?flContentX:0.f,flTopHeight),
+			vDrawPos+ImVec2(vWindowSize.x,flBodyBottom),1.f);
+		pDrawList->AddRectFilled(vDrawPos, vDrawPos + ImVec2(vWindowSize.x, flTopHeight), F::Render.Background0, flRounding, ImDrawFlags_RoundCornersTop);
+		pDrawList->AddRectFilled(vDrawPos + ImVec2(0, flTopHeight), vDrawPos + ImVec2(flSideWidth, flBodyBottom), imageArea==1?ImU32(F::Render.Sidebar):F::MenuBackground.PanelColor(F::Render.Sidebar));
+#else
 		pDrawList->AddRectFilled(vDrawPos, vDrawPos + vWindowSize, F::Render.Background1, flRounding);
 		pDrawList->AddRectFilled(vDrawPos, vDrawPos + ImVec2(vWindowSize.x, flTopHeight), F::Render.Background0, flRounding, ImDrawFlags_RoundCornersTop);
 		pDrawList->AddRectFilled(vDrawPos + ImVec2(0, flTopHeight), vDrawPos + ImVec2(flSideWidth, flBodyBottom), F::Render.Sidebar);
+#endif
 		pDrawList->AddRectFilled(vDrawPos + ImVec2(0, flBodyBottom), vDrawPos + vWindowSize, F::Render.Background0, flRounding, ImDrawFlags_RoundCornersBottom);
 
 		{

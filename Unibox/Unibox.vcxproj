@@ -456,6 +456,8 @@
     <ClCompile Include="src\Features\Aimbot\AimbotGlobal\AimbotGlobal.cpp" />
     <ClCompile Include="src\Features\Aimbot\AimbotHitscan\AimbotHitscan.cpp" />
     <ClCompile Include="src\Features\Aimbot\AimbotMelee\AimbotMelee.cpp" />
+    <ClCompile Include="src\Features\Aimbot\SpyKnife\SpyKnife.cpp" />
+    <ClCompile Include="src\Features\Aimbot\SpyKnife\SpyKnifeVisuals.cpp" />
     <ClCompile Include="src\Features\Aimbot\AimbotProjectile\AimbotProjectile.cpp" />
     <ClCompile Include="src\Features\Aimbot\AimbotProjectile\AimbotSpecial.cpp" />
     <ClCompile Include="src\Features\Aimbot\AimbotProjectile\AimbotPasstime.cpp" />
@@ -518,6 +520,7 @@
     <ClCompile Include="src\Features\CritHack\CritHack.cpp" />
     <ClCompile Include="src\Features\EnginePrediction\EnginePrediction.cpp" />
     <ClCompile Include="src\Features\ImGui\Render.cpp" />
+    <ClCompile Include="src\Features\ImGui\Background\MenuBackground.cpp" />
     <ClCompile Include="src\Features\ImGui\Overlay\CaptureOverlay.cpp" />
     <ClCompile Include="src\Features\ImGui\Menu\Menu.cpp" />
     <ClCompile Include="src\Features\ImGui\Menu\Pages.cpp" />
@@ -731,8 +734,18 @@
     <ClInclude Include="src\BytePatches\BytePatches.h" />
     <ClInclude Include="src\Features\Aimbot\Aimbot.h" />
     <ClInclude Include="src\Features\Aimbot\AimbotGlobal\AimbotGlobal.h" />
+    <ClInclude Include="src\Features\Aimbot\Shared\AimPolicy.h" />
+    <ClInclude Include="src\Features\Aimbot\Shared\AimGeometry.h" />
+    <ClInclude Include="src\Features\Aimbot\Shared\BurstPlanner.h" />
+    <ClInclude Include="src\Features\Aimbot\Shared\SeamGeometry.h" />
+    <ClInclude Include="src\Features\Aimbot\Shared\SplashWindow.h" />
+    <ClInclude Include="src\Features\Aimbot\Shared\AnimationTimeline.h" />
+    <ClInclude Include="src\Features\Aimbot\Shared\StickySearch.h" />
+    <ClInclude Include="src\Features\Resolver\AnimationPose.h" />
     <ClInclude Include="src\Features\Aimbot\AimbotHitscan\AimbotHitscan.h" />
     <ClInclude Include="src\Features\Aimbot\AimbotMelee\AimbotMelee.h" />
+    <ClInclude Include="src\Features\Aimbot\SpyKnife\SpyKnife.h" />
+    <ClInclude Include="src\Features\Aimbot\SpyKnife\KnifePolicy.h" />
     <ClInclude Include="src\Features\Aimbot\AimbotProjectile\AimbotProjectile.h" />
     <ClInclude Include="src\Features\Aimbot\AimbotProjectile\ProjProfiler.h" />
     <ClInclude Include="src\Features\Aimbot\AutoAirblast\AutoAirblast.h" />
@@ -953,6 +966,9 @@
     <ClInclude Include="src\Features\Binds\Binds.h" />
     <ClInclude Include="src\Features\Configs\Configs.h" />
     <ClInclude Include="src\Features\ImGui\Render.h" />
+    <ClInclude Include="src\Features\ImGui\Background\MenuBackground.h" />
+    <ClInclude Include="src\Features\ImGui\Background\BackgroundPolicy.h" />
+    <ClInclude Include="src\Features\ImGui\Background\BackgroundImageIO.h" />
     <ClInclude Include="src\Features\ImGui\Theme.h" />
     <ClInclude Include="src\Features\ImGui\IndicatorCache.h" />
     <ClInclude Include="src\Features\ImGui\Overlay\CaptureOverlay.h" />

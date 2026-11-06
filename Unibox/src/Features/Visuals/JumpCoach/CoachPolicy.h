@@ -73,6 +73,20 @@ namespace JumpCoach
         if(result.valid) result.efficiency=std::clamp(result.actualGain/result.gain,0.f,1.f);
         return result;
     }
+    struct AirControl {bool directional=false;float turnScale=.5f,maxDelta=180.f;};
+    // Re-evaluate held movement intent every future tick. Holding the current
+    // auto-strafe output for the whole flight predicts an alternating side as a turn.
+    inline Vector DirectionalWish(Vector velocity,Vector intent,const AirControl& control)
+    {
+        if(!control.directional||intent.Squared()<.5f||velocity.Horizontal()<1.f) return intent;
+        const float target=std::atan2(intent.y,intent.x)*180.f/Pi;
+        const float current=std::atan2(velocity.y,velocity.x)*180.f/Pi;
+        const float delta=Wrap(target-current);
+        if(std::abs(delta)>std::clamp(control.maxDelta,0.f,180.f)) return intent;
+        const float scale=.9f+.1f*std::clamp(control.turnScale,0.f,1.f);
+        const float yaw=(current+(delta>0?90.f:-90.f)+delta*(1.f-scale))*Pi/180.f;
+        return {std::cos(yaw),std::sin(yaw),0};
+    }
     struct Body {Vector origin,velocity,mins,maxs;};
     struct Trace {float fraction=1;Vector normal;bool solid=false,sky=false;};
     using TraceFn=Trace(*)(void*,Vector,Vector,Vector,Vector);
@@ -100,7 +114,7 @@ namespace JumpCoach
             normal.y>.001f?body.mins.y:normal.y<-.001f?body.maxs.y:0,body.mins.z};
     }
     inline void Predict(Body body,Vector input,float inputSpeed,const Physics& physics,int ticks,int budget,
-        TraceFn trace,void* context,bool optimal,int side,Plan& plan)
+        TraceFn trace,void* context,bool optimal,int side,Plan& plan,const AirControl& control={})
     {
         plan.count=plan.traces=0;plan.end=End::Invalid;plan.collision=false;plan.landing=plan.normal={};
         if(!physics.Valid() || !trace || !body.origin.Finite() || !body.velocity.Finite() || !body.mins.Finite() || !body.maxs.Finite()
@@ -124,7 +138,7 @@ namespace JumpCoach
         for(int tick=0;tick<ticks;++tick)
         {
             body.velocity.z-=physics.gravity*physics.interval*.5f;
-            const Vector wish=optimal?Guide(body.velocity,{},0,0,side,physics).wish:input;
+            const Vector wish=optimal?Guide(body.velocity,{},0,0,side,physics).wish:DirectionalWish(body.velocity,input,control);
             body.velocity=Accelerate(body.velocity,wish,optimal?physics.wishSpeed:inputSpeed,physics);
             for(float* v:{&body.velocity.x,&body.velocity.y,&body.velocity.z}) *v=std::clamp(*v,-physics.maxVelocity,physics.maxVelocity);
             float remaining=physics.interval,elapsed=0;

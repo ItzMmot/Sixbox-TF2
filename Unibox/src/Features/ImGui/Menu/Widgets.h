@@ -1,5 +1,6 @@
 #pragma once
 #include "WidgetEnv.h"
+#include "../Background/MenuBackground.h"
 #include "../Fonts/MaterialDesign/IconDefinitions.h"
 #include <ImGui/imgui_internal.h>
 #include <ImGui/imgui_stdlib.h>
@@ -221,11 +222,20 @@ namespace ImGui
 		return sEntry[0] == '#' && !strcmp(sEntry, "##Divider");
 	}
 
+	inline ImU32 MenuImagePanelColor(ImU32 color)
+	{
+#ifndef TEXTMODE
+		const auto* window=GetCurrentWindow();
+		return window&&window->RootWindow&&!strcmp(window->RootWindow->Name,"Main")?F::MenuBackground.PanelColor(color):color;
+#else
+		return color;
+#endif
+	}
 	inline void RenderBackground(ImU32 uBackground, float flRounding = H::Draw.Scale(6))
 	{
 		ImVec2 vSize = GetWindowSize();
 		ImVec2 vDrawPos = GetDrawPos();
-		GetWindowDrawList()->AddRectFilled(vDrawPos, vDrawPos + vSize, uBackground, flRounding);
+		GetWindowDrawList()->AddRectFilled(vDrawPos, vDrawPos + vSize, MenuImagePanelColor(uBackground), flRounding);
 	}
 	inline void RenderTitledBackground(float flTitleHeight, const char* sTitle = nullptr, bool bSolid = false)
 	{
@@ -235,8 +245,8 @@ namespace ImGui
 		const float flRounding = H::Draw.Scale(6);
 
 		if (bSolid)
-			pDrawList->AddRectFilled(vDrawPos, vDrawPos + vSize, F::Render.Background1, flRounding);
-		pDrawList->AddRectFilled(vDrawPos, vDrawPos + vSize, F::Render.Background0p5, flRounding);
+			pDrawList->AddRectFilled(vDrawPos, vDrawPos + vSize, MenuImagePanelColor(F::Render.Background1), flRounding);
+		pDrawList->AddRectFilled(vDrawPos, vDrawPos + vSize, MenuImagePanelColor(F::Render.Background0p5), flRounding);
 		if (sTitle)
 		{
 			ImFont* pFont = F::Render.FontBold;

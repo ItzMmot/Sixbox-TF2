@@ -18,6 +18,7 @@
 #ifndef TEXTMODE
 #include "../Features/ImGui/Overlay/CaptureOverlay.h"
 #include "../Features/ImGui/RenderSync.h"
+#include "../Features/ImGui/Background/MenuBackground.h"
 #include "../Features/Visuals/Aura/Aura.h"
 #endif
 #include "../SDK/Events/Events.h"
@@ -250,6 +251,7 @@ void CCore::Unload()
 	F::SteamProfileCache.Shutdown();
 
 #ifndef TEXTMODE
+	F::MenuBackground.Shutdown();
 	F::Materials.RequestUnload();
 	for (int i = 0; i < 200 && !F::Materials.IsUnloadComplete(); ++i)
 		Sleep(10);

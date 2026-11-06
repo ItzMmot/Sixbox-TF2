@@ -1,7 +1,11 @@
 #include "AimbotHitscan.h"
+#include "../Shared/AimGeometry.h"
+#include "../../NoSpread/NoSpreadHitscan/NoSpreadHitscan.h"
+#include "../../NoSpread/SpreadMath.h"
 
 #include "../Aimbot.h"
 #include "../../Ticks/Ticks.h"
+#include "../../EnginePrediction/EnginePrediction.h"
 #include "../../Resolver/Resolver.h"
 #include "../../NoSpread/NoSpread.h"
 #include "../../Simulation/MovementSimulation/MovementSimulation.h"
@@ -433,6 +437,7 @@ void CAimbotHitscan::BuildForwardRecords(CTFPlayer* pTarget, TickRecord* pBaseRe
 		predRecord.m_vMaxs = pBaseRecord->m_vMaxs;
 		predRecord.m_bOnShot = false;
 		predRecord.m_bInvalid = false;
+		predRecord.m_tResolverIdentity=pBaseRecord->m_tResolverIdentity;
 
 		const Vec3 vDelta = predRecord.m_vOrigin - vBaseOrigin;
 		for (int b = 0; b < MAXSTUDIOBONES; b++)
@@ -464,6 +469,189 @@ void CAimbotHitscan::BuildForwardRecords(CTFPlayer* pTarget, TickRecord* pBaseRe
 		for (auto pRec : vRecords)
 			vMerged.push_back(pRec);
 		vRecords = std::move(vMerged);
+	}
+}
+
+bool CAimbotHitscan::CaptureBurstMotion(CTFPlayer* player,int horizon,bool own,
+	BurstMotion& output,int startDelay)
+{
+	if(!player||horizon<0||horizon>=int(output.size())||startDelay<0||startDelay>horizon
+		||(own&&!G::CurrentUserCmd)) return false;
+	MoveStorage storage{};storage.m_pExternalData=m_aBurstScratch.data();
+	storage.m_nExternalBytes=m_aBurstScratch.size();storage.m_bStorePath=false;
+	struct Restore
+	{
+		MoveStorage& storage;CTFPlayer* player;CUserCmd* command;CUserCmd dummy;
+		CBasePlayer* movementPlayer;CTFPlayer* tfPlayer;CMoveData* move;
+		byte* predictedState=nullptr;
+		~Restore()
+		{
+			F::MoveSim.Restore(storage);
+			if(predictedState)
+			{
+				CPredictionCopy copy={PC_EVERYTHING,player,PC_DATA_NORMAL,predictedState,PC_DATA_PACKED};
+				copy.TransferData("BurstRestorePrediction",player->entindex(),player->GetPredDescMap());
+			}
+			player->m_pCurrentCommand()=command;G::DummyCmd=dummy;
+			I::GameMovement->player=movementPlayer;I::GameMovement->m_pTFPlayer=tfPlayer;I::GameMovement->mv=move;
+		}
+	} restore{storage,player,player->m_pCurrentCommand(),G::DummyCmd,
+		I::GameMovement->player,I::GameMovement->m_pTFPlayer,I::GameMovement->mv};
+	const Vec3 shootOffset=own?m_vEyePos-player->m_vecOrigin()-player->m_vecViewOffset():Vec3{};
+	if(own&&startDelay>0)
+	{
+		// Ticks::End re-predicts a withheld current command without AntiWarp.
+		// Keep the active prediction intact while simulating that alternate start.
+		const auto size=player->GetIntermediateDataSize();
+		auto map=player->GetPredDescMap();
+		if(!map||!size||size>m_aBurstPredictedState.size()) return false;
+		CPredictionCopy copy={PC_EVERYTHING,m_aBurstPredictedState.data(),PC_DATA_PACKED,player,PC_DATA_NORMAL};
+		copy.TransferData("BurstSavePrediction",player->entindex(),map);
+		restore.predictedState=m_aBurstPredictedState.data();
+		if(!F::EnginePrediction.RestoreSimulationBase(player)) return false;
+	}
+	const Vec3 initialVelocity=player->m_vecVelocity();
+	if(!F::MoveSim.Initialize(player,storage,false,!own,false)||storage.m_bFailed) return false;
+	if(own) storage.m_MoveData.m_vecVelocity=player->m_vecVelocity()=initialVelocity;
+	bool antiWarp=own&&Vars::Doubletap::AntiWarp.Value&&player->m_hGroundEntity();
+	Vec3 shiftVelocity=initialVelocity;
+	output[0]=own?m_vEyePos:storage.m_MoveData.m_vecAbsOrigin;
+	// Delay zero already includes the current predicted command. Delayed plans
+	// first execute its ordinary movement, then arm AntiWarp at the future start.
+	for(int offset=own&&startDelay>0?0:1;offset<=horizon;++offset)
+	{
+		if(own)
+		{
+			storage.m_MoveData.m_flForwardMove=G::CurrentUserCmd->forwardmove;
+			storage.m_MoveData.m_flSideMove=G::CurrentUserCmd->sidemove;
+			storage.m_MoveData.m_nButtons=G::CurrentUserCmd->buttons;
+			if(offset==startDelay)
+			{
+				antiWarp=Vars::Doubletap::AntiWarp.Value&&player->m_hGroundEntity();
+				shiftVelocity=storage.m_MoveData.m_vecVelocity;
+			}
+			if(antiWarp&&offset>=startDelay)
+				F::Ticks.PredictAntiWarp(G::CurrentUserCmd->viewangles.y,storage.m_MoveData.m_flForwardMove,
+					storage.m_MoveData.m_flSideMove,(std::max)(horizon-offset,0),horizon-startDelay+1,
+					startDelay>0?&shiftVelocity:nullptr);
+		}
+		F::MoveSim.RunTick(storage,false);
+		if(storage.m_bFailed) return false;
+		output[offset]=storage.m_MoveData.m_vecAbsOrigin+(own?player->m_vecViewOffset()+shootOffset:Vec3{});
+		const Vec3& point=output[offset];
+		if(!std::isfinite(point.x)||!std::isfinite(point.y)||!std::isfinite(point.z)) return false;
+	}
+	return true;
+}
+
+const Burst::Plan* CAimbotHitscan::PreparedBurst(int command,CTFWeaponBase* weapon,CBaseEntity*& target) const
+{
+	target=m_hPreparedTarget.Get();
+	return m_preparedBurst.valid&&m_preparedBurst.startDelay==0&&command==m_iPreparedCommand
+		&&m_hPreparedWeapon.Get()==weapon&&target?&m_preparedBurst:nullptr;
+}
+
+void CAimbotHitscan::OptimizePattern(Target_t& target,CTFPlayer* local,CTFWeaponBase* weapon,
+	const std::vector<HitscanHitbox_t>& hitboxes,TickRecord* record)
+{
+	const int mode=Vars::Aimbot::General::AimType.Value;
+	const bool pellets=Vars::Aimbot::Hitscan::PelletOptimization.Value;
+	const bool planning=Vars::Aimbot::Hitscan::BurstPlanning.Value;
+	if((!pellets&&!planning)||(mode!=Vars::Aimbot::General::AimTypeEnum::Silent&&mode!=Vars::Aimbot::General::AimTypeEnum::Plain)
+		||!G::CanPrimaryAttack||!target.m_pEntity->IsPlayer()||!record||weapon->GetWeaponID()==TF_WEAPON_LASER_POINTER
+		||weapon->GetWeaponID()==TF_WEAPON_MEDIGUN||weapon->GetWeaponID()==TF_WEAPON_SNIPERRIFLE_CLASSIC) return;
+	std::array<SpreadMath::Pellet_t,512> pattern{};
+	SpreadMath::Pellet_t correction{};bool exact=false;
+	const float spread=weapon->GetWeaponSpread();
+	const int count=spread>0?F::NoSpreadHitscan.BuildAimPattern(local,weapon,G::CurrentUserCmd,
+		pattern.data(),int(pattern.size()),correction,exact):1;
+	if(count<=0) return;
+	auto* set=target.m_pEntity->As<CBaseAnimating>()->GetHitboxSet();
+	if(!set||set->numhitboxes<=0||set->numhitboxes>HITBOX_MAX) return;
+	std::array<bool,HITBOX_MAX> allowed{};
+	for(const auto& hitbox:hitboxes) if(hitbox.m_iHitbox>=0&&hitbox.m_iHitbox<HITBOX_MAX) allowed[hitbox.m_iHitbox]=true;
+	if(target.m_nAimedHitbox==HITBOX_HEAD&&G::CanHeadshot) {allowed.fill(false);allowed[HITBOX_HEAD]=true;}
+	const int shift=planning&&!F::Ticks.m_bDoubletap&&Vars::Aimbot::General::AutoShoot.Value
+		&&!(G::OriginalCmd.buttons&IN_ATTACK)?F::Ticks.GetTicks(weapon):0;
+	const int ammunition=weapon->m_iClip1()<0?local->GetAmmoCount(weapon->m_iPrimaryAmmoType()):weapon->m_iClip1();
+	Burst::Timing timing{TICK_INTERVAL,weapon->GetFireRate(),local->m_nTickBase(),std::clamp(shift,0,22),
+		ammunition/(std::max)(weapon->GetAmmoPerShot(),1),weapon->GetWeaponID()==TF_WEAPON_MINIGUN?.2f:0.f};
+	bool burst=shift>0&&timing.Valid()&&F::Ticks.GetShotsWithinPacket(weapon,shift+1)>1;
+	if(weapon->GetWeaponID()==TF_WEAPON_MINIGUN&&weapon->As<CTFMinigun>()->m_iWeaponState()!=AC_STATE_FIRING) burst=false;
+	if(burst)
+	{
+		burst=CaptureBurstMotion(target.m_pEntity->As<CTFPlayer>(),Burst::MaxDelay,false,m_aBurstTargets);
+		// Waiting before arming a shift uses ordinary movement; the AntiWarp
+		// sequence starts only when that candidate's first shot arms it.
+		for(int delay=0;burst&&delay<=Burst::MaxDelay;++delay)
+			burst=CaptureBurstMotion(local,timing.extras+delay,true,m_aBurstEyes[delay],delay);
+	}
+	const int stride=(std::max)(1,(count+(burst?7:31))/(burst?8:32));
+	const float step=std::atan(spread*.5f)*180.f/Math::PI_V<float>;
+	const Vec3 seed=target.m_vAngleTo;
+	Vec3 best=seed;float bestScore=-1;
+	AimPolicy::Budget traces{burst?4096:768};
+	CTraceFilterWorldAndPropsOnly filter(local);
+	auto score=[&](Vec3 angles,int offset=0,int delay=0) {
+		Burst::Score result;
+		const Vec3 punch=local->m_vecPunchAngle();Vec3 sent=angles+punch;
+		if(correction.m_flRight||correction.m_flUp)
+		{
+			Vec3 direction;Math::AngleVectors(sent,&direction);
+			Vec3 command=SpreadMath::SolveAngles(direction,correction,sent.z,sent.x)-punch;
+			Math::ClampAngles(command);sent=command+punch;
+		}
+		const Vec3 eye=burst?m_aBurstEyes[delay][offset+delay]:m_vEyePos;
+		// Commands in a held-aim batch declare the same rewind pose. Target
+		// motion is advanced only when comparing a later whole-batch start.
+		const Vec3 relativeEye=eye-(burst?m_aBurstTargets[delay]-m_aBurstTargets[0]:Vec3{});
+		for(int pellet=0;pellet<count;pellet+=stride)
+		{
+			const Vec3 ray=SpreadMath::GetDirection(sent,pattern[pellet]);
+			float nearest=8192.f;int box=-1;
+			for(int i=0;i<set->numhitboxes;++i)
+			{
+				auto* hitbox=set->pHitbox(i);
+				if(!hitbox||hitbox->bone<0||hitbox->bone>=MAXSTUDIOBONES) continue;
+				const float entry=AimGeometry::Entry(relativeEye,ray,hitbox->bbmin,hitbox->bbmax,record->m_aBones[hitbox->bone],nearest);
+				if(entry>=0&&entry<nearest) {nearest=entry;box=i;}
+			}
+			if(box<0||!allowed[box]) continue;
+			const float weight=float((std::min)(stride,count-pellet))/float(count);result.open+=weight;
+			if(!traces.Take()) return Burst::Score{};
+			CGameTrace trace={};SDK::Trace(eye,eye+ray*(nearest+.1f),MASK_SHOT,&filter,&trace);
+			if(trace.fraction>.999f&&!trace.startsolid&&!trace.allsolid) result.hits+=weight;
+		}
+		result.valid=true;return result;
+	};
+	const int candidates=pellets&&spread>0?9:1;
+	for(int candidate=0;candidate<candidates;++candidate)
+	{
+		const int grid=candidate==0?4:candidate<=4?candidate-1:candidate;
+		Vec3 angles=seed+Vec3(float(grid/3-1)*step,float(grid%3-1)*step,0);Math::ClampAngles(angles);
+		if(!F::AimbotGlobal.ShouldAimAtAngle(angles)||Math::CalcFov(I::EngineClient->GetViewAngles(),angles+local->m_vecPunchAngle())>Vars::Aimbot::General::AimFOV.Value) continue;
+		float value=0;int shots=0;bool valid=true;
+		for(int offset=0;offset<=(burst?timing.extras:0)&&shots<(burst?timing.ammo:1);offset=timing.NextShot(offset))
+		{
+			const auto sample=score(angles,offset);if(!sample.valid) {valid=false;break;}
+			value+=sample.hits;++shots;
+		}
+		if(!valid) break;
+		if(value>bestScore+.001f) {bestScore=value;best=angles;}
+	}
+	if(burst)
+	{
+		Burst::Scores scores{};
+		for(int delay=0;delay<=Burst::MaxDelay;++delay)
+			for(int offset=0;offset<=timing.extras;++offset) scores[delay][offset]=score(best,offset,delay);
+		m_preparedBurst=Burst::Schedule(timing,scores);
+		m_iPreparedCommand=G::OriginalCmd.command_number;m_hPreparedWeapon.Set(weapon);m_hPreparedTarget.Set(target.m_pEntity);
+		if(m_preparedBurst.valid&&m_preparedBurst.startDelay>0) m_iBurstDelayCommand=G::CurrentUserCmd->command_number;
+	}
+	if(bestScore>0&&best!=seed)
+	{
+		Vec3 forward;Math::AngleVectors(best+local->m_vecPunchAngle(),&forward);
+		target.m_vPos=m_vEyePos+forward*m_vEyePos.DistTo(target.m_vPos);target.m_vAngleTo=best;
 	}
 }
 
@@ -607,6 +795,7 @@ int CAimbotHitscan::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* 
 						tTarget.m_nAimedHitbox = tHitbox.m_iHitbox;
 						iTargetBone = tHitbox.m_pBox->bone;
 					}
+					if(!pHoldAngle) OptimizePattern(tTarget,pLocal,pWeapon,vHitboxes,pRecord);
 					return true;
 				}
 				else if (bChanged && SDK::VisPos(pLocal, tTarget.m_pEntity, m_vEyePos, vOrigin))
@@ -626,6 +815,10 @@ int CAimbotHitscan::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* 
 
 bool CAimbotHitscan::ShouldFire(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd, const Target_t& tTarget)
 {
+	if (F::Ticks.BurstWithheld()) {pCmd->buttons &= ~IN_ATTACK; return false;}
+	if(Vars::Aimbot::Hitscan::BurstPlanning.Value&&m_iBurstDelayCommand==pCmd->command_number
+		&&!(G::OriginalCmd.buttons&IN_ATTACK)) {pCmd->buttons&=~IN_ATTACK;return false;}
+
 	if (!Vars::Aimbot::General::AutoShoot.Value)
 		return false;
 
@@ -923,6 +1116,7 @@ void CAimbotHitscan::BacktrackToCrosshair(CUserCmd* pCmd)
 
 void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
+	m_iBurstDelayCommand=-1;m_preparedBurst={};m_iPreparedCommand=m_iAimedCommand=-1;
 	m_vForwardRecords.clear();
 
 	const int nWeaponID = pWeapon->GetWeaponID();
@@ -986,6 +1180,10 @@ void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 
 	for (auto& tTarget : vTargets)
 	{
+		// A shifted series keeps its verified target. Switching mid-series
+		// would apply a schedule scored against somebody else's rewind pose.
+		if (auto* planned = F::Ticks.BurstTarget(); planned && planned != tTarget.m_pEntity)
+			continue;
 		if (nWeaponID == TF_WEAPON_MEDIGUN && pWeapon->As<CWeaponMedigun>()->m_hHealingTarget().Get() == tTarget.m_pEntity)
 		{
 			if (G::LastUserCmd->buttons & IN_ATTACK)
@@ -1003,6 +1201,7 @@ void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 			break;
 		}
 
+		m_iAimedCommand=G::OriginalCmd.command_number;m_hAimedTarget.Set(tTarget.m_pEntity);
 		if (ShouldFire(pLocal, pWeapon, pCmd, tTarget))
 		{
 			switch (nWeaponID)
@@ -1036,7 +1235,7 @@ void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 		{
 			F::Aimbot.m_eRanType = EWeaponType::HITSCAN;
 			if (tTarget.m_pEntity->IsPlayer())
-				F::Resolver.HitscanRan(pLocal, tTarget.m_pEntity->As<CTFPlayer>(), pWeapon, tTarget.m_nAimedHitbox);
+				F::Resolver.HitscanRan(pLocal, tTarget.m_pEntity->As<CTFPlayer>(), pWeapon, tTarget.m_nAimedHitbox,tTarget.m_pRecord);
 
 			if (tTarget.m_bBacktrack)
 			{

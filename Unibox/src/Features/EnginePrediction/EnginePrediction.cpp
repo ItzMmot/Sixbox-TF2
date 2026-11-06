@@ -67,6 +67,7 @@ void CEnginePrediction::Simulate(CTFPlayer* pLocal, CUserCmd* pCmd)
 
 void CEnginePrediction::Start(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
+	m_bSnapshotValid = false;
 	m_bInPrediction = true;
 	if (!pLocal->IsAlive())
 		return;
@@ -97,30 +98,40 @@ void CEnginePrediction::Start(CTFPlayer* pLocal, CUserCmd* pCmd)
 
 	CPredictionCopy copy = { PC_EVERYTHING, m_tLocal.m_pData, PC_DATA_PACKED, pLocal, PC_DATA_NORMAL };
 	copy.TransferData("EnginePredictionStart", pLocal->entindex(), pMap);
+	m_hSnapshotOwner = pLocal;
+	m_bSnapshotValid = true;
 
 	Simulate(pLocal, pCmd);
 }
 
+bool CEnginePrediction::RestoreSimulationBase(CTFPlayer* player) const
+{
+	if (!m_bInPrediction || !m_bSnapshotValid || !player || m_hSnapshotOwner.Get() != player
+		|| !m_tLocal.m_pData || player->GetIntermediateDataSize() != m_tLocal.m_iSize)
+		return false;
+	auto map = player->GetPredDescMap();
+	if (!map) return false;
+	CPredictionCopy copy = { PC_EVERYTHING, player, PC_DATA_NORMAL, m_tLocal.m_pData, PC_DATA_PACKED };
+	copy.TransferData("EnginePredictionSimulationBase", player->entindex(), map);
+	return true;
+}
+
 void CEnginePrediction::End(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
+	if (m_bSnapshotValid)
+	{
+		RestoreSimulationBase(pLocal);
+		I::GlobalVars->tickcount = m_nOldTickCount;
+		I::GlobalVars->curtime = m_flOldCurrentTime;
+		I::GlobalVars->frametime = m_flOldFrameTime;
+	}
+	m_bSnapshotValid = false;
 	m_bInPrediction = false;
-	if (!pLocal->IsAlive())
-		return;
-
-	auto pMap = pLocal->GetPredDescMap();
-	if (!pMap)
-		return;
-
-	I::GlobalVars->tickcount = m_nOldTickCount;
-	I::GlobalVars->curtime = m_flOldCurrentTime;
-	I::GlobalVars->frametime = m_flOldFrameTime;
-
-	CPredictionCopy copy = { PC_EVERYTHING, pLocal, PC_DATA_NORMAL, m_tLocal.m_pData, PC_DATA_PACKED };
-	copy.TransferData("EnginePredictionEnd", pLocal->entindex(), pMap);
 }
 
 void CEnginePrediction::Unload()
 {
+	m_bSnapshotValid = m_bInPrediction = false;
 	if (m_tLocal.m_pData)
 	{
 		I::MemAlloc->Free(m_tLocal.m_pData);

@@ -52,7 +52,7 @@ class CBaseEntity : public IClientEntity
 public:
 	NETVAR(m_flAnimTime, float, "CBaseEntity", "m_flAnimTime");
 	NETVAR(m_flSimulationTime, float, "CBaseEntity", "m_flSimulationTime");
-	NETVAR(m_ubInterpolationFrame, int, "CBaseEntity", "m_ubInterpolationFrame");
+	NETVAR(m_ubInterpolationFrame, byte, "CBaseEntity", "m_ubInterpolationFrame");
 	NETVAR(m_vecOrigin, Vec3, "CBaseEntity", "m_vecOrigin");
 	NETVAR(m_angRotation, Vec3, "CBaseEntity", "m_angRotation");
 	NETVAR(m_nModelIndex, int, "CBaseEntity", "m_nModelIndex");
@@ -297,6 +297,8 @@ public:
 	VIRTUAL(EyePosition, Vec3, 142, this);
 	VIRTUAL(EyeAngles, Vec3&, 143, this);
 	VIRTUAL(UpdateVisibility, void, 91, this);
+	// TF2 x64 C_BaseEntity; neighbouring slots match the existing SDK interface.
+	VIRTUAL_ARGS(OnLatchInterpolatedVariables, void, 93, (int flags), this, flags);
 	VIRTUAL_ARGS(SetNextClientThink, void, 104, (float flNextThink), this, flNextThink);
 	VIRTUAL_ARGS(ShouldCollide, bool, 146, (int collisionGroup, int contentsMask), this, collisionGroup, contentsMask);
 

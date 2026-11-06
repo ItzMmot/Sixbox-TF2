@@ -137,3 +137,14 @@ A useful live check is a local jump map: enable the coach, leave Only in air off
 launch with Auto RJ or manually, release W/S and follow an A/D yaw cue. Compare
 solid versus dashed paths, the landing ring and the actual landing. Test stock
 and Direct Hit cooldowns, a loaded/empty reload, map changes and screenshots.
+
+## Held-input landing jitter
+
+Directional auto-strafe prediction now re-evaluates held input intent on every
+future tick. It no longer holds a single alternating side command for the full
+flight. Landing rings have independent world-space smoothing using the existing
+0–1 slider, including when path drawing is off. Landed path endpoints stay
+world-anchored; marker positions remain on the current collision plane. Actual
+and ideal landing markers keep separate histories. No new Jump Coach setting
+was added. Regression cases cover alternating strafe phases, marker attenuation,
+slider zero, floor changes and a moving owner with a stationary landing.

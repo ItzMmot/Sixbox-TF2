@@ -1,4 +1,6 @@
 #include "AimbotMelee.h"
+#include "../SpyKnife/SpyKnife.h"
+#include "../Shared/AimGeometry.h"
 #include "../AutoTrolldier/AutoTrolldier.h"
 
 #include "../Aimbot.h"
@@ -8,6 +10,37 @@
 #include "../../Visuals/Visuals.h"
 #include "../../NavBot/BotUtils.h"
 #include "../../AntiCheatCompatibility/AntiCheatCompatibility.h"
+#include "../../Configs/Configs.h"
+#include <cstdio>
+
+namespace
+{
+	struct KnifeStatus {bool active=false,geometry=false;int hit=-1,targets=0,result=0;const char* stage="entry";} s_knife;
+	struct KnifeTraceScope
+	{
+		CTFWeaponBase* weapon;CUserCmd* command;bool active;
+		KnifeTraceScope(CTFWeaponBase* w,CUserCmd* c):weapon(w),command(c),active(w->GetWeaponID()==TF_WEAPON_KNIFE
+			&&(Vars::Aimbot::General::AimType.Value||w->As<CTFKnife>()->m_bReadyToBackstab()))
+		{if(active) {s_knife={};s_knife.active=true;}}
+		~KnifeTraceScope()
+		{
+			if(!active) return;s_knife.active=false;
+			static ULONGLONG next=0;static int records=0;const auto now=GetTickCount64();
+			if(now<next||records>=64) return;next=now+2000;++records;
+			char path[MAX_PATH],line[512];
+			const int pathSize=std::snprintf(path,sizeof(path),"%sSpyKnife.txt",F::Configs.m_sConfigPath.c_str());
+			if(pathSize<0||pathSize>=int(sizeof(path))) return;
+			const int size=std::snprintf(line,sizeof(line),
+				"spy-fix-1 cmd=%d stage=%s raised=%d ready=%d aim=%d autoshoot=%d targets=%d trace_target=%d geometry=%d result=%d requested_attack=%d smack=%.5f\r\n",
+				G::OriginalCmd.command_number,s_knife.stage,int(weapon->As<CTFKnife>()->m_bReadyToBackstab()),int(G::CanPrimaryAttack),
+				Vars::Aimbot::General::AimType.Value,int(Vars::Aimbot::General::AutoShoot.Value),s_knife.targets,s_knife.hit,int(s_knife.geometry),
+				s_knife.result,int(bool(command->buttons&IN_ATTACK)),weapon->m_flSmackTime());
+			if(size<=0||size>=int(sizeof(line))) return;
+			const HANDLE file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+			if(file==INVALID_HANDLE_VALUE) return;DWORD written;WriteFile(file,line,DWORD(size),&written,nullptr);CloseHandle(file);
+		}
+	};
+}
 
 static inline bool AimFriendlyBuilding(CTFPlayer* pLocal, CBaseObject* pBuilding)
 {
@@ -91,9 +124,18 @@ static inline std::vector<Target_t> GetTargets(CTFPlayer* pLocal, CTFWeaponBase*
 			if (F::AimbotGlobal.ShouldIgnore(pEntity, pLocal, pWeapon))
 				continue;
 
-			float flFOVTo; Vec3 vPos, vAngleTo;
-			if (!F::AimbotGlobal.PlayerBoneInFOV(pEntity->As<CTFPlayer>(), vLocalPos, vLocalAngles, flFOVTo, vPos, vAngleTo))
-				continue;
+			// Melee target selection uses collision bounds, not hitscan bones.
+			// A knife can already be touching a valid victim without a bone record.
+			const Vec3 mins=pEntity->m_vecOrigin()+pEntity->m_vecMins();
+			const Vec3 maxs=pEntity->m_vecOrigin()+pEntity->m_vecMaxs();
+			Vec3 direction;Math::AngleVectors(vLocalAngles,&direction);
+			const float entry=AimPolicy::RayBox(AimGeometry::Point(vLocalPos),AimGeometry::Point(direction),
+				AimGeometry::Point(mins),AimGeometry::Point(maxs),10000.f);
+			Vec3 vPos=entry>=0?vLocalPos+direction*(entry+.01f):vLocalPos.Clamp(mins,maxs);
+			if(vPos.DistToSqr(vLocalPos)<1e-6f) vPos=(mins+maxs)*.5f;
+			const Vec3 vAngleTo=Math::CalcAngle(vLocalPos,vPos);
+			const float flFOVTo=entry>=0?0.f:Math::CalcFov(vLocalAngles,vAngleTo);
+			if(flFOVTo>F::AimbotGlobal.GetAimFOV()) continue;
 
 			float flDistTo = vLocalPos.DistToSqr(vPos);
 			bool bTeam = pEntity->m_iTeamNum() == pLocal->m_iTeamNum();
@@ -203,10 +245,12 @@ static inline int GetSwingTime(CTFWeaponBase* pWeapon, bool bVar = true)
 void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd, const std::vector<Target_t>& vTargets)
 {
 	m_mRecordMap.clear(); m_mPaths.clear();
+	if(pWeapon->m_flSmackTime()>0.f||!Vars::Aimbot::General::AutoShoot.Value) m_swingDeferral.Reset();
+	m_bNextWindow=false;m_aNextValid.fill(false);
 	m_vEyePos = pLocal->GetShootPos();
 	m_flRange = pWeapon->GetSwingRange();
 	m_iSimulatedTicks = GetSwingTime(pWeapon), m_iSwingTicks = GetSwingTime(pWeapon, false);
-	m_iDoubletapTicks = F::Ticks.GetTicks(pWeapon);
+	m_iDoubletapTicks = pWeapon->GetWeaponID()==TF_WEAPON_KNIFE?0:F::Ticks.GetTicks(pWeapon);
 	m_bShouldSwing = m_iDoubletapTicks <= m_iSwingTicks || Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity();
 	m_bSimulatedLocal = false;
 
@@ -220,7 +264,13 @@ void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 	std::unordered_map<int, MoveStorage> mMoveStorage;
 	std::unordered_map<int, int> mTargetTicks;
 
-	F::MoveSim.Initialize(pLocal, mMoveStorage[pLocal->entindex()], false, !m_iDoubletapTicks, false);
+	auto& localMove=mMoveStorage[pLocal->entindex()];
+	if(!F::MoveSim.Initialize(pLocal,localMove,false,!m_iDoubletapTicks,false)||localMove.m_bFailed)
+	{
+		F::MoveSim.Restore(localMove);
+		m_iSimulatedTicks=m_iSwingTicks=m_iDoubletapTicks=0;m_bShouldSwing=true;
+		return;
+	}
 	for (auto& tTarget : vTargets)
 	{
 		const bool bNetworked = bAccountPing && tTarget.m_pEntity->IsPlayer();
@@ -325,8 +375,75 @@ void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 		}
 	}
 
+	if(Vars::Aimbot::Melee::SwingMargin.Value&&m_bSimulatedLocal&&m_iSimulatedTicks>0&&!m_iDoubletapTicks&&pWeapon->m_flSmackTime()<0)
+	{
+		auto& own=mMoveStorage[pLocal->entindex()];
+		if(!own.m_bFailed)
+		{
+			F::MoveSim.RunTick(own,false);
+			m_vNextEyePos=own.m_MoveData.m_vecAbsOrigin+pLocal->m_vecViewOffset();m_bNextWindow=true;
+			for(auto& target:vTargets)
+			{
+				const int index=target.m_pEntity->entindex();
+				if(index<=0||index>=int(m_aNextDelta.size())) continue;
+				auto& move=mMoveStorage[index];
+				if(move.m_bFailed) continue;
+				const Vec3 before=move.m_vPredictedOrigin;
+				F::MoveSim.RunTick(move,false);
+				m_aNextDelta[index]=move.m_vPredictedOrigin-before;m_aNextValid[index]=true;
+			}
+		}
+	}
 	for (auto& tMoveStorage : mMoveStorage | std::views::values)
 		F::MoveSim.Restore(tMoveStorage);
+}
+
+bool CAimbotMelee::TryReadyKnife(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* command)
+{
+	if(weapon->GetWeaponID()!=TF_WEAPON_KNIFE||!weapon->As<CTFKnife>()->m_bReadyToBackstab()
+		||!weapon->As<CTFKnife>()->m_bKnifeExists()||!Vars::Aimbot::General::AutoShoot.Value||!G::CanPrimaryAttack||command->weaponselect
+		||!(Vars::Aimbot::General::Target.Value&Vars::Aimbot::General::TargetEnum::Players)) return false;
+	const float scale=(std::max)(1.f,local->m_flModelScale());
+	const float range=SDK::AttribHookValue(weapon->GetSwingRange(),"melee_range_multiplier",weapon)*scale;
+	const float hull=SDK::AttribHookValue(18.f,"melee_bounds_multiplier",weapon)*scale;
+	if(!std::isfinite(range)||!std::isfinite(hull)||range<=0||hull<0) return false;
+	const Vec3 eye=local->GetShootPos();Vec3 forward;Math::AngleVectors(command->viewangles,&forward);
+	CGameTrace trace={};CTraceFilterHitscan filter(local);
+	SDK::TraceHull(eye,eye+forward*range,{}, {},MASK_SOLID,&filter,&trace);
+	if(Trolldier::HullFallback(trace.fraction,trace.startsolid,trace.allsolid))
+		SDK::TraceHull(eye,eye+forward*range,Vec3::Get(-hull),Vec3::Get(hull),MASK_SOLID,&filter,&trace);
+	auto* entity=trace.m_pEnt;
+	if(s_knife.active) {s_knife.stage="ready-trace";s_knife.hit=entity?entity->entindex():-1;}
+	if(!entity||!entity->IsPlayer()||trace.allsolid||entity->m_iTeamNum()==local->m_iTeamNum()
+		||F::AimbotGlobal.ShouldIgnore(entity,local,weapon)) return false;
+	auto* victim=entity->As<CTFPlayer>();
+	if(!victim->IsAlive()||victim->IsDormant()||victim->IsAGhost()
+		||SDK::AttribHookValue(0,"cannot_be_backstabbed",victim)) return false;
+	if(Vars::Aimbot::Melee::IgnoreRazorback.Value)
+	{
+		CBaseEntity* items[64]{};CUtlVector<CBaseEntity*> sources(items,64);
+		if(SDK::AttribHookValue(0,"set_blockbackstab_once",victim,&sources))
+			for(int i=0;i<sources.Count();++i) if(sources[i]&&sources[i]->ShouldDraw()) return false;
+	}
+	if(Vars::Aimbot::Melee::AutoBackstab.Value)
+	{
+		const Vec3 ownerCenter=local->GetAbsOrigin()+(local->m_vecMins()+local->m_vecMaxs())*.5f;
+		const Vec3 targetCenter=victim->GetAbsOrigin()+(victim->m_vecMins()+victim->m_vecMaxs())*.5f;
+		Vec3 targetForward;Math::AngleVectors(victim->GetEyeAngles(),&targetForward);
+		const bool valid=AimPolicy::BackstabGeometry(AimGeometry::Point(targetCenter-ownerCenter),
+			AimGeometry::Point(forward),AimGeometry::Point(targetForward));
+		if(s_knife.active) {s_knife.stage="ready-geometry";s_knife.geometry=valid;}
+		if(!valid) return false;
+	}
+	// The ready flag is only a hint: the trace and geometry above must match
+	// today's victim. No historical yaw, bones, or swing credit can veto this hit.
+	command->buttons|=IN_ATTACK;
+	if(s_knife.active) {s_knife.stage="ready-attack";s_knife.result=1;}
+	G::Attacking=SDK::IsAttacking(local,weapon,command,true);
+	if(G::Attacking) F::Aimbot.m_eRanType=EWeaponType::MELEE;
+	G::AimTarget={victim->entindex(),I::GlobalVars->tickcount};
+	G::AimPoint={trace.endpos,I::GlobalVars->tickcount};
+	return true;
 }
 
 bool CAimbotMelee::CanBackstab(CBaseEntity* pTarget, CTFPlayer* pLocal, Vec3 vEyeAngles)
@@ -336,7 +453,8 @@ bool CAimbotMelee::CanBackstab(CBaseEntity* pTarget, CTFPlayer* pLocal, Vec3 vEy
 
 	if (Vars::Aimbot::Melee::IgnoreRazorback.Value)
 	{
-		CUtlVector<CBaseEntity*> itemList;
+		CBaseEntity* items[64]{};
+		CUtlVector<CBaseEntity*> itemList(items,64);
 		int iBackstabShield = SDK::AttribHookValue(0, "set_blockbackstab_once", pTarget, &itemList);
 		if (iBackstabShield && itemList.Count())
 		{
@@ -438,24 +556,31 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 	auto& vSimRecords = m_mRecordMap[tTarget.m_pEntity->entindex()];
 
 	std::vector<TickRecord*> vRecords = {};
+	bool currentFallback=false,currentBones=false;
 	if (F::Backtrack.GetRecords(tTarget.m_pEntity, vRecords))
 	{
 		const auto vTimeMods = GetTimeMods();
-
-		for (auto& tRecord : vSimRecords)
-			vRecords.push_back(&tRecord);
-		for (auto iTimeMod : vTimeMods)
-			vRecords = F::Backtrack.GetValidRecords(vRecords, pLocal, true, -TICKS_TO_TIME(iTimeMod));
-		if (vRecords.empty())
-			return false;
+		for (auto& record : vSimRecords) vRecords.push_back(&record);
+		for (auto timeMod : vTimeMods)
+			vRecords=F::Backtrack.GetValidRecords(vRecords,pLocal,true,-TICKS_TO_TIME(timeMod));
 	}
-	else
+	if(vRecords.empty())
 	{
-		F::Backtrack.m_tRecord = { tTarget.m_pEntity->m_flSimulationTime(), tTarget.m_pEntity->m_vecOrigin(), tTarget.m_pEntity->m_vecMins(), tTarget.m_pEntity->m_vecMaxs() };
-		if (!tTarget.m_pEntity->SetupBones(F::Backtrack.m_tRecord.m_aBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, tTarget.m_pEntity->m_flSimulationTime()))
-			return false;
-
-		vRecords = { &F::Backtrack.m_tRecord };
+		// History may exist but contain no valid rewind pose. Melee collision
+		// only needs current bounds; missing historical bones must not veto it.
+		currentFallback=true;
+		auto& record=F::Backtrack.m_tRecord;
+		record={tTarget.m_pEntity->m_flSimulationTime(),tTarget.m_pEntity->m_vecOrigin(),
+			tTarget.m_pEntity->m_vecMins(),tTarget.m_pEntity->m_vecMaxs()};
+		if(!vSimRecords.empty())
+		{
+			const auto& predicted=vSimRecords.front();
+			record.m_flSimTime=predicted.m_flSimTime;record.m_vOrigin=predicted.m_vOrigin;
+			record.m_vMins=predicted.m_vMins;record.m_vMaxs=predicted.m_vMaxs;
+		}
+		if(Vars::Visuals::Hitbox::BonesEnabled.Value&Vars::Visuals::Hitbox::BonesEnabledEnum::OnShot)
+			currentBones=tTarget.m_pEntity->SetupBones(record.m_aBones,MAXSTUDIOBONES,BONE_USED_BY_ANYTHING,tTarget.m_pEntity->m_flSimulationTime());
+		vRecords.push_back(&record);
 	}
 
 	CGameTrace trace = {};
@@ -483,7 +608,7 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 
 		SDK::TraceHull(m_vEyePos, vTraceEnd, {}, {}, MASK_SOLID, &filter, &trace);
 		bool bReturn = trace.m_pEnt == tTarget.m_pEntity;
-		if (!bReturn)
+		if (!bReturn && Trolldier::HullFallback(trace.fraction,trace.startsolid,trace.allsolid))
 		{
 			SDK::TraceHull(m_vEyePos, vTraceEnd, vSwingMins, vSwingMaxs, MASK_SOLID, &filter, &trace);
 			bReturn = trace.m_pEnt == tTarget.m_pEntity;
@@ -498,8 +623,39 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 
 		if (bReturn)
 		{
-			tTarget.m_pRecord = pRecord;
-			tTarget.m_bBacktrack = tTarget.m_iTargetType == TargetEnum::Player;
+			const int index=tTarget.m_pEntity->entindex();
+			if(m_bNextWindow&&index>0&&index<int(m_aNextDelta.size())&&m_aNextValid[index]
+				&&Vars::Aimbot::General::AutoShoot.Value&&pWeapon->m_flSmackTime()<0)
+			{
+				const Vec3 mins=pRecord->m_vOrigin+pRecord->m_vMins,maxs=pRecord->m_vOrigin+pRecord->m_vMaxs;
+				const float margin=flRange+flHull-AimPolicy::BoxDistance(AimGeometry::Point(m_vEyePos),AimGeometry::Point(mins),AimGeometry::Point(maxs));
+				const float next=flRange+flHull-AimPolicy::BoxDistance(AimGeometry::Point(m_vNextEyePos),
+					AimGeometry::Point(mins+m_aNextDelta[index]),AimGeometry::Point(maxs+m_aNextDelta[index]));
+				const float drift=(std::max)(2.f,(m_vNextEyePos-m_vEyePos).Length()*.15f);
+				if(margin>0&&!AimPolicy::PreferWindow(margin,next,drift))
+				{
+					struct RestoreWindow
+					{
+						CBaseEntity* entity;Vec3 origin,mins,maxs;
+						~RestoreWindow() {entity->SetAbsOrigin(origin);entity->m_vecMins()=mins;entity->m_vecMaxs()=maxs;}
+					} restore{tTarget.m_pEntity,tTarget.m_pEntity->GetAbsOrigin(),tTarget.m_pEntity->m_vecMins(),tTarget.m_pEntity->m_vecMaxs()};
+					tTarget.m_pEntity->SetAbsOrigin(pRecord->m_vOrigin+m_aNextDelta[index]);
+					tTarget.m_pEntity->m_vecMins()=pRecord->m_vMins+PLAYER_ORIGIN_COMPRESSION;
+					tTarget.m_pEntity->m_vecMaxs()=pRecord->m_vMaxs-PLAYER_ORIGIN_COMPRESSION;
+					const Vec3 point=m_vNextEyePos.Clamp(mins+m_aNextDelta[index],maxs+m_aNextDelta[index]);
+					Vec3 angle;Aim(G::CurrentUserCmd->viewangles,Math::CalcAngle(m_vNextEyePos,point),angle);
+					Vec3 forward;Math::AngleVectors(angle,&forward);
+					CGameTrace hit={};
+					SDK::TraceHull(m_vNextEyePos,m_vNextEyePos+forward*flRange,{}, {},MASK_SOLID,&filter,&hit);
+					if(hit.m_pEnt!=tTarget.m_pEntity&&Trolldier::HullFallback(hit.fraction,hit.startsolid,hit.allsolid))
+						SDK::TraceHull(m_vNextEyePos,m_vNextEyePos+forward*flRange,vSwingMins,vSwingMaxs,MASK_SOLID,&filter,&hit);
+					if(hit.m_pEnt==tTarget.m_pEntity&&!hit.startsolid&&!hit.allsolid&&F::AimbotGlobal.ShouldAimAtAngle(angle)
+						&&m_swingDeferral.Wait(tTarget.m_pEntity->As<IHandleEntity>()->GetRefEHandle().ToInt(),G::OriginalCmd.command_number)) return 2;
+				}
+
+			}
+			tTarget.m_pRecord = !currentFallback||currentBones?pRecord:nullptr;
+			tTarget.m_bBacktrack = !currentFallback&&tTarget.m_iTargetType == TargetEnum::Player;
 
 			return true;
 		}
@@ -646,7 +802,7 @@ static inline void DrawVisuals(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserC
 		if (G::Attacking == 1)
 		{
 
-			if (bBoxes)
+			if (bBoxes&&tTarget.m_pRecord)
 			{
 				auto vBoxes = F::Visuals.GetHitboxes(tTarget.m_pRecord->m_aBones, tTarget.m_pEntity->As<CBaseAnimating>());
 				G::BoxStorage.insert(G::BoxStorage.end(), vBoxes.begin(), vBoxes.end());
@@ -707,6 +863,7 @@ void CAimbotMelee::BacktrackToCrosshair(CTFPlayer* pLocal, CUserCmd* pCmd)
 
 void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
+	KnifeTraceScope diagnostic(pWeapon,pCmd);
 	const bool committed = F::AutoTrolldier.HasCommittedStrike(pLocal, pWeapon, pCmd);
 	if (F::AutoTrolldier.IsActive(pCmd) || committed)
 	{
@@ -832,22 +989,38 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		pCmd->buttons |= IN_ATTACK;
 	if (!Vars::Aimbot::General::AimType.Value
 		|| !F::AimbotGlobal.ShouldAim() && pWeapon->m_flSmackTime() < 0.f)
+	{
+		if(s_knife.active) s_knife.stage="aim-disabled";
 		return;
+	}
 
 	m_mRecordMap.clear(); m_mPaths.clear();
 	m_iDoubletapTicks = F::Ticks.GetTicks(pWeapon);
+
+	if(!F::SpyKnife.Handles(pLocal,pWeapon)&&TryReadyKnife(pLocal,pWeapon,pCmd)) return;
 
 	if (RunSapper(pLocal, pWeapon, pCmd))
 		return;
 
 	auto vTargets = F::AimbotGlobal.ManageTargets(GetTargets, pLocal, pWeapon, Vars::Aimbot::General::TargetSelectionMelee.Value);
+	if(s_knife.active) {s_knife.stage="target-selection";s_knife.targets=int(vTargets.size());}
 	if (vTargets.empty())
+	{
+		F::SpyKnife.Run(pLocal,pWeapon,pCmd,vTargets);
 		return;
+	}
+
+	if(F::SpyKnife.Run(pLocal,pWeapon,pCmd,vTargets))
+	{
+		if(s_knife.active) {s_knife.stage=F::SpyKnife.Active()?"knife-automation":"precise-contact";s_knife.result=G::Attacking==1?1:0;}
+		return;
+	}
 
 	UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
 	for (auto& tTarget : vTargets)
 	{
 		const auto iResult = CanHit(tTarget, pLocal, pWeapon);
+		if(s_knife.active) {s_knife.stage="can-hit";s_knife.result=iResult;}
 		if (!iResult) continue;
 		if (iResult == 2)
 		{
@@ -857,7 +1030,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 			break;
 		}
 
-		if (Vars::Aimbot::General::AutoShoot.Value && pWeapon->m_flSmackTime() < 0.f)
+		if (Vars::Aimbot::General::AutoShoot.Value && (pWeapon->GetWeaponID()==TF_WEAPON_KNIFE||pWeapon->m_flSmackTime() < 0.f))
 		{
 			if (m_bShouldSwing)
 				pCmd->buttons |= IN_ATTACK;

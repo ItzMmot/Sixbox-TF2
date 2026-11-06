@@ -1,4 +1,6 @@
 #include "Ticks.h"
+#include "../Aimbot/SpyKnife/KnifePolicy.h"
+#include "../Aimbot/AimbotHitscan/AimbotHitscan.h"
 #include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
 
 #include "../PacketManip/AntiAim/AntiAim.h"
@@ -17,8 +19,37 @@ MAKE_SIGNATURE(Con_NXPrintf, "engine.dll", "48 89 54 24 ? 4C 89 44 24 ? 4C 89 4C
 
 void CTicks::Reset()
 {
+	CancelBurst();
+	m_bKnifeWarp = false;
 	m_bDoubletap = m_bRecharge = m_bWarp = false;
 	m_iShiftedTicks = m_iShiftedGoal = 0;
+}
+
+int CTicks::AvailableKnifeWarpTicks() const
+{
+	if(!m_bGoalReached||m_bWarp||m_bDoubletap||m_bRecharge||F::AntiCheatCompatibility.Active()) return 0;
+	return SpyKnife::AvailableTicks(m_iShiftedTicks,I::ClientState->chokedcommands,m_iMaxUsrCmdProcessTicks);
+}
+bool CTicks::BeginKnifeWarp(int extraTicks)
+{
+	if(extraTicks<1||extraTicks>AvailableKnifeWarpTicks()) return false;
+	// Reuse the ordinary CL_Move/UserCmd transport and its existing packet cap.
+	// No position packet or entity teleport: every extra command is simulated.
+	CancelBurst();m_bKnifeWarp=m_bWarp=true;m_bAntiWarp=false;m_bGoalReached=false;
+	m_iShiftedGoal=m_iShiftedTicks-extraTicks;
+	return true;
+}
+void CTicks::CancelKnifeAttack()
+{
+	if(!m_bDoubletap) return;
+	m_bDoubletap=m_bAntiWarp=false;m_iShiftedGoal=m_iShiftedTicks;CancelBurst();
+}
+void CTicks::StopKnifeWarp()
+{
+	if(!m_bKnifeWarp) return;
+	m_bKnifeWarp=false;m_iShiftedGoal=m_iShiftedTicks;
+	// Keep m_bWarp for the remainder of this command so ManagePacket flushes
+	// the completed prefix. The outer Move loop releases the mode afterwards.
 }
 
 void CTicks::Recharge(CTFPlayer* pLocal)
@@ -87,12 +118,85 @@ void CTicks::Doubletap(CTFPlayer* pLocal, CUserCmd* pCmd)
 
 	m_bDoubletap = true;
 	m_iShiftedGoal = std::max(m_iShiftedTicks - Vars::Doubletap::TickLimit.Value + 1, 0);
+	CancelBurst();
+	CBaseEntity* target = nullptr;
+	const auto* plan = F::AimbotHitscan.PreparedBurst(G::OriginalCmd.command_number, pWeapon, target);
+	if (plan && plan->extras == m_iShiftedTicks - m_iShiftedGoal
+		&& F::AimbotHitscan.AimedAt(G::OriginalCmd.command_number, target))
+	{
+		m_burstSchedule = *plan;
+		m_hBurstWeapon.Set(pWeapon);
+		m_hBurstTarget.Set(target);
+	}
 	if (Vars::Doubletap::AntiWarp.Value)
 		m_bAntiWarp = pLocal->m_hGroundEntity();
 }
 
+void CTicks::CancelBurst()
+{
+	m_burstSchedule = {};
+	m_bBurstWithheld = false;
+	m_hBurstWeapon.Set(nullptr);
+	m_hBurstTarget.Set(nullptr);
+}
+
+void CTicks::BeginBurstCommand(CTFPlayer* local, CTFWeaponBase* weapon, CUserCmd* command)
+{
+	m_bBurstWithheld = false;
+	if (!m_burstSchedule.valid) return;
+	auto* target = m_hBurstTarget.Get();
+	const int offset = m_burstSchedule.extras - (m_iShiftedTicks - m_iShiftedGoal);
+	const int mode = Vars::Aimbot::General::AimType.Value;
+	if (!m_bDoubletap || m_bWarp || m_bRecharge || !local || !local->IsAlive()
+		|| weapon != m_hBurstWeapon.Get() || !target || !target->IsPlayer()
+		|| !target->As<CTFPlayer>()->IsAlive() || target->IsDormant()
+		|| !Vars::Aimbot::Hitscan::BurstPlanning.Value || !Vars::Aimbot::General::AutoShoot.Value
+		|| (mode != Vars::Aimbot::General::AimTypeEnum::Silent && mode != Vars::Aimbot::General::AimTypeEnum::Plain)
+		|| (G::OriginalCmd.buttons & IN_ATTACK) || F::AutoTrolldier.IsActive(command)
+		|| F::AutoRocketJump.IsRunning() || offset <= 0 || offset > m_burstSchedule.extras)
+	{
+		CancelBurst();
+		return;
+	}
+	m_bBurstWithheld = m_burstSchedule.Withholds(offset);
+	command->buttons &= ~IN_RELOAD;
+	if (weapon->GetWeaponID() == TF_WEAPON_MINIGUN) command->buttons &= ~IN_ATTACK2;
+	// Holding through cooldown keeps the minigun spun up. Readiness commands
+	// still require a fresh successful aim check before the shot is sent.
+	if (m_bBurstWithheld || G::CanPrimaryAttack) command->buttons &= ~IN_ATTACK;
+	else command->buttons |= IN_ATTACK;
+	G::Attacking = SDK::IsAttacking(local, weapon, command);
+}
+
+void CTicks::EnforceBurstCommand(CTFPlayer* local, CTFWeaponBase* weapon, CUserCmd* command)
+{
+	if (!m_burstSchedule.valid) return;
+	if (m_bBurstWithheld)
+		command->buttons &= ~IN_ATTACK;
+	else if (G::CanPrimaryAttack && !F::AimbotHitscan.AimedAt(G::OriginalCmd.command_number, m_hBurstTarget.Get()))
+	{
+		// A changed/occluded target invalidates the remaining schedule. Do not
+		// fire the attack injected at BeginBurstCommand without revalidation.
+		command->buttons &= ~IN_ATTACK;
+		CancelBurst();
+	}
+	else if (G::CanPrimaryAttack && !(command->buttons & IN_ATTACK))
+		CancelBurst(); // An aim modifier rejected a planned shot; its cooldown never started.
+	G::Attacking = SDK::IsAttacking(local, weapon, command);
+}
+
 static Vec3 s_vVelocity = {};
 static int s_iMaxTicks = 0;
+void CTicks::PredictAntiWarp(float yaw,float& forward,float& side,int remaining,int total,const Vec3* initialVelocity) const
+{
+	const Vec3& velocity=initialVelocity?*initialVelocity:s_vVelocity;
+	Vec3 angles;Math::VectorAngles(velocity,angles);angles.y=yaw-angles.y;
+	Vec3 wish;Math::AngleVectors(angles,&wish);wish*=velocity.Length2D();
+	const int maximum=initialVelocity?total:(std::max)(s_iMaxTicks,total);
+	if(remaining>(std::max)(maximum-8,3)) {forward=-wish.x;side=-wish.y;}
+	else if(remaining>3) forward=side=0;
+	else {forward=wish.x;side=wish.y;}
+}
 void CTicks::AntiWarp(CTFPlayer* pLocal, float flYaw, float& flForwardMove, float& flSideMove, int iTicks)
 {
 	s_iMaxTicks = std::max(iTicks + 1, s_iMaxTicks);
@@ -321,7 +425,9 @@ void CTicks::Move(float accumulated_extra_samples, bool bFinalTick)
 		if (m_bWarp)
 			m_iDeficit = 0;
 
+		m_bKnifeWarp = false;
 		m_bDoubletap = m_bWarp = false;
+		CancelBurst();
 	}
 	else // else recharge, run once if we have any choked ticks
 	{

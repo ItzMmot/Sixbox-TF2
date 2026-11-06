@@ -1,5 +1,6 @@
 #pragma once
 #include "../../../SDK/SDK.h"
+#include "../Shared/AimPolicy.h"
 
 #include "../AimbotGlobal/AimbotGlobal.h"
 
@@ -8,6 +9,7 @@ class CAimbotMelee
 private:
 	void UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd, const std::vector<Target_t>& vTargets);
 	bool CanBackstab(CBaseEntity* pTarget, CTFPlayer* pLocal, Vec3 vEyeAngles);
+	bool TryReadyKnife(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* command);
 	int CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pWeapon);
 	
 	bool Aim(const Vec3& vCurAngle, const Vec3& vToAngle, Vec3& vOut, int iMethod = Vars::Aimbot::General::AimType.Value);
@@ -18,7 +20,11 @@ private:
 	bool FindNearestBuildPoint(CBaseObject* pBuilding, CTFPlayer* pLocal, Vec3& vPoint);
 	bool RunSapper(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd);
 
-	Vec3 m_vEyePos = {};
+	Vec3 m_vEyePos = {},m_vNextEyePos={};
+	std::array<Vec3,129> m_aNextDelta{};
+	std::array<bool,129> m_aNextValid{};
+	bool m_bNextWindow=false;
+	AimPolicy::SwingDeferral m_swingDeferral;
 	float m_flRange = 0.f;
 	bool m_bShouldSwing = false;
 	bool m_bSimulatedLocal = false;

@@ -1,6 +1,7 @@
 #pragma once
 #include "../../SDK/SDK.h"
 #include <functional>
+#include "../Aimbot/Shared/SeamGeometry.h"
 
 //#define WORLD_DEBUG
 
@@ -78,11 +79,13 @@ private:
 	NormalValidCallback* m_pNormalValidCallback = &s_fNormalValid;
 
 	int m_iNeedsCache = FaceTypeEnum::Cache;
+	std::uint32_t m_iGeometryRevision=1;
 	std::unordered_map<void*, std::vector<Face_t>> m_mFaceCache = {};
 	std::vector<int> m_vBrushStorage = {};
 	std::vector<Vec3> m_vDispVertices = std::vector<Vec3>(3);
 
 public:
+	std::uint32_t GeometryRevision() const {return m_iGeometryRevision;}
 	void Cache();
 	void CacheBoxBrushes();
 	void CachePlaneBrushes();
@@ -91,6 +94,8 @@ public:
 	void Uncache();
 
 	std::vector<Face_t> GetFacesInAABB(const Vec3& vMins, const Vec3& vMaxs, int iMask = MASK_SOLID, ITraceFilter* pFilter = nullptr, int iFlags = FaceTypeEnum::All);
+
+	int GatherSeamFaces(const Vec3& mins,const Vec3& maxs,SeamGeometry::Face* output,int capacity);
 
 	void SetNormalValidCallback(NormalValidCallback* pCallback = nullptr);
 

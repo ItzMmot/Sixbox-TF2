@@ -1,4 +1,5 @@
 #include "../SDK/SDK.h"
+#include "../Features/Aimbot/SpyKnife/SpyKnife.h"
 #include "../Features/Visuals/Aura/Aura.h"
 #include "../Features/Visuals/JumpCoach/JumpCoach.h"
 
@@ -32,6 +33,7 @@ MAKE_HOOK(CClientModeShared_DoPostScreenSpaceEffects, U::Memory.GetVirtual(I::Cl
 	F::NavRender.RenderWorld();
 	F::AutoTrolldier.RenderWorld();
     F::JumpCoach.RenderWorld();
+    F::SpyKnife.RenderWorld();
 	F::Visuals.Triggers(pLocal);
 	F::Visuals.DrawEffects();
 	if (I::EngineVGui->IsGameUIVisible() || !F::Materials.m_bLoaded)

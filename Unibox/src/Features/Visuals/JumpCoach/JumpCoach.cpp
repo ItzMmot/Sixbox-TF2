@@ -64,8 +64,13 @@ void CJumpCoach::Update(CTFPlayer* local,CTFWeaponBase* weapon,const CUserCmd* c
         || !std::isfinite(G::OriginalCmd.viewangles.y) || !std::isfinite(G::OriginalCmd.viewangles.x) || !std::isfinite(PredictionTime.Value)) {Reset();return;}
     JumpCoach::Body body{Snapshot(local->m_vecOrigin()),Snapshot(local->m_vecVelocity()),Snapshot(local->m_vecMins()+PLAYER_ORIGIN_COMPRESSION),Snapshot(local->m_vecMaxs()-PLAYER_ORIGIN_COMPRESSION)};
     if(!body.origin.Finite() || !body.velocity.Finite() || !std::isfinite(body.velocity.Horizontal())) {Reset();return;}
-    const float yaw=cmd->viewangles.y*JumpCoach::Pi/180.f,c=std::cos(yaw),s=std::sin(yaw);
-    JumpCoach::Vector wish{c*cmd->forwardmove+s*cmd->sidemove,s*cmd->forwardmove-c*cmd->sidemove,0};
+    const bool directional=Vars::Misc::Movement::AutoStrafe.Value==Vars::Misc::Movement::AutoStrafeEnum::Directional
+        &&!F::AutoTrolldier.IsActive(cmd);
+    const auto& intent=directional?G::OriginalCmd:*cmd;
+    const float yaw=intent.viewangles.y*JumpCoach::Pi/180.f,c=std::cos(yaw),s=std::sin(yaw);
+    JumpCoach::Vector wish{c*intent.forwardmove+s*intent.sidemove,s*intent.forwardmove-c*intent.sidemove,0};
+    const JumpCoach::AirControl control{directional,Vars::Misc::Movement::AutoStrafeTurnScale.Value,
+        Vars::Misc::Movement::AutoStrafeMaxDelta.Value};
     const float inputSpeed=(std::min)(m_physics.wishSpeed,wish.Horizontal());
     wish=JumpCoach::Unit(wish);
     if(G::OriginalCmd.sidemove>1) m_side=-1;
@@ -104,7 +109,7 @@ void CJumpCoach::Update(CTFPlayer* local,CTFWeaponBase* weapon,const CUserCmd* c
         display.wish=Native(guide.wish);
         const int ticks=std::clamp(int(std::ceil(display.horizon/m_physics.interval)),1,JumpCoach::MaxTicks);
         const int budget=std::clamp(TraceBudget.Value,256,8192);
-        JumpCoach::Predict(body,wish,inputSpeed,m_physics,ticks,budget,Trace,local,false,m_side,m_plan);
+        JumpCoach::Predict(body,wish,inputSpeed,m_physics,ticks,budget,Trace,local,false,m_side,m_plan,control);
         display.end=m_plan.end;
         if(DrawPath.Value)
         {
@@ -252,7 +257,7 @@ void CJumpCoach::RenderWorld()
     const auto data=m_display.Get();
     const uint64_t now=GetTickCount64();
     if(!data.active || now>data.expires || SDK::CleanScreenshot() || I::EngineVGui->IsGameUIVisible())
-    {m_renderTime=0;m_renderPath.Clear();m_renderIdeal.Clear();return;}
+    {m_renderTime=0;m_renderPath.Clear();m_renderIdeal.Clear();m_renderLanding.Clear();m_renderIdealLanding.Clear();return;}
     const bool reset=!m_renderTime || now<m_renderTime || now-m_renderTime>250
         || data.generation!=m_renderGeneration || data.end!=m_renderEnd || data.horizon!=m_renderHorizon;
     const float elapsed=reset?0.f:float(now-m_renderTime)*.001f;
@@ -270,8 +275,8 @@ void CJumpCoach::RenderWorld()
     Color_t faint=data.color;faint.a=uint8_t(faint.a*.35f);
     if(data.smoothing>0.f)
     {
-        m_renderPath.Update(data.path,data.count,data.origin,elapsed,data.smoothing,reset);
-        m_renderIdeal.Update(data.ideal,data.idealCount,data.origin,elapsed,data.smoothing,reset);
+        m_renderPath.Update(data.path,data.count,data.origin,elapsed,data.smoothing,reset,data.end==JumpCoach::End::Landed);
+        m_renderIdeal.Update(data.ideal,data.idealCount,data.origin,elapsed,data.smoothing,reset,data.idealLanded);
         path(m_renderIdeal.points,m_renderIdeal.count,faint,true);
         path(m_renderPath.points,m_renderPath.count,data.color,false);
     }
@@ -293,10 +298,14 @@ void CJumpCoach::RenderWorld()
         H::Draw.RenderLine(centre-right*7,centre+right*7,color,data.depth);
         H::Draw.RenderLine(centre-up*7,centre+up*7,color,data.depth);
     };
+    if(data.idealLanded) m_renderIdealLanding.Update(data.idealLanding,data.idealNormal,elapsed,data.smoothing,reset);
+    else m_renderIdealLanding.Clear();
+    if(data.end==JumpCoach::End::Landed) m_renderLanding.Update(data.landing,data.normal,elapsed,data.smoothing,reset);
+    else m_renderLanding.Clear();
     if(data.landingMarker)
     {
-        if(data.idealLanded) landingRing(data.idealLanding,data.idealNormal,faint,true);
-        if(data.end==JumpCoach::End::Landed) landingRing(data.landing,data.normal,data.color,false);
+        if(m_renderIdealLanding.valid) landingRing(m_renderIdealLanding.point,m_renderIdealLanding.normal,faint,true);
+        if(m_renderLanding.valid) landingRing(m_renderLanding.point,m_renderLanding.normal,data.color,false);
     }
     if(data.showShot)
     {

@@ -1,4 +1,7 @@
 #include "Pages.h"
+#ifndef TEXTMODE
+#include "../Background/MenuBackground.h"
+#endif
 
 #ifndef TEXTMODE
 
@@ -183,6 +186,10 @@ static void AimbotWeapons()
 		FDropdown(Vars::Aimbot::Hitscan::Hitboxes);
 		FDropdown(Vars::Aimbot::Hitscan::MultipointHitboxes);
 		FSlider(Vars::Aimbot::Hitscan::MultipointScale);
+		FToggle(Vars::Aimbot::Hitscan::PelletOptimization);
+		FTooltip("Score pellet coverage in Plain/Silent aim, including partial cover.");
+		FToggle(Vars::Aimbot::Hitscan::BurstPlanning);
+		FTooltip("Plan each shot using simulated movement, cooldown and ammo. May withhold individual shots or wait up to eight commands before starting; manual fire is preserved.");
 		FDropdown(Vars::Aimbot::Hitscan::Modifiers);
 		PushTransparent(!(Vars::Aimbot::Hitscan::Modifiers.Value & Vars::Aimbot::Hitscan::ModifiersEnum::Tapfire));
 		{
@@ -195,8 +202,28 @@ static void AimbotWeapons()
 	if (Section("Melee"))
 	{
 		FToggle(Vars::Aimbot::Melee::AutoBackstab);
+		FToggle(Vars::Aimbot::Melee::KnifePrecision);
+		FTooltip("Validate the current knife contact and native backstab geometry without waiting for the ready animation or historical bones.");
+		FSlider(Vars::Aimbot::Melee::BackstabSafety);
+		FTooltip("Larger angle and contact margins reduce grazing/body hits. Warp movement is acknowledged before the attack is revalidated.");
+		FToggle(Vars::Aimbot::Melee::AutoTrickstab);
+		PushTransparent(!Vars::Aimbot::Melee::AutoTrickstab.Value);
+		FDropdown(Vars::Aimbot::Melee::TrickstabMode);
+		FSlider(Vars::Aimbot::Melee::TrickstabPrediction);
+		PopTransparent();
+		FToggle(Vars::Aimbot::Melee::BackstabVisuals);
+		PushTransparent(!Vars::Aimbot::Melee::BackstabVisuals.Value);
+		FToggle(Vars::Aimbot::Melee::BackstabPath);
+		PopTransparent();
+		FToggle(Vars::Aimbot::Melee::WarpBehind);
+		FTooltip("Spend charged ticks only after a collision-checked ground route reaches a backstab. Requires precise knife, auto backstab, auto shoot, and Plain / Silent / Locking aim. Aborts on changed target or prediction drift.");
+		PushTransparent(!Vars::Aimbot::Melee::WarpBehind.Value);
+		FSlider(Vars::Aimbot::Melee::WarpBehindDistance);
+		PopTransparent();
 		FToggle(Vars::Aimbot::Melee::IgnoreRazorback);
 		FToggle(Vars::Aimbot::Melee::SwingPrediction);
+		FToggle(Vars::Aimbot::Melee::SwingMargin);
+		FTooltip("Wait for a stronger predicted contact when the next tick offers a better swing window.");
 		FToggle(Vars::Aimbot::Melee::WhipTeam);
 	} EndSection();
 	if (Vars::Debug::Options.Value)
@@ -334,6 +361,10 @@ static void AimbotWeapons()
 			FSlider(Vars::Aimbot::Projectile::HitChance);
 		}
 		PopTransparent();
+		FToggle(Vars::Aimbot::Projectile::SplashOptimization);
+		FTooltip("Rank splash impacts and refine geometry. Sticky launchers retain bounded candidate/arc/refinement/air searches across commands and revalidate before firing.");
+		FToggle(Vars::Aimbot::Projectile::HuntsmanSafePoint);
+		FTooltip("Search head entry points and reject body-first contacts. Disable to use the previous head offsets.");
 		FSlider(Vars::Aimbot::Projectile::SplashRadius);
 		PushTransparent(!Vars::Aimbot::Projectile::AutoRelease.Value);
 		{
@@ -778,6 +809,47 @@ static void VisualsWorld()
 	EndTable();
 }
 
+static void BackgroundImageSettings(bool appearance)
+{
+    std::scoped_lock settings(F::Binds.m_mMutex);
+    using namespace Vars::Menu::BackgroundImage;
+    if(!appearance)
+    {
+        FToggle(Enabled);
+        const bool picker=F::MenuBackground.Picking();
+        PushTransparent(picker);
+        if(FButton(picker?"Choosing image...##Backdrop":"Choose image##Backdrop")&&!picker)
+            F::MenuBackground.Pick(static_cast<HWND>(GetMainViewport()->PlatformHandleRaw));
+        PopTransparent();
+        if(FInputText("Image file path",Path.Value,GetContentRegionAvail().x)) Path[DEFAULT_BIND]=Path.Value;
+        FTooltip("PNG, JPEG, BMP, GIF or TIFF. Linux absolute paths are accepted. Animated images use their first frame.");
+        if(FButton("Reload image##Backdrop",FButtonEnum::Left)) F::MenuBackground.Reload();
+        if(FButton("Remove image##Backdrop",FButtonEnum::Right)) F::MenuBackground.Clear();
+        if(F::MenuBackground.Loading()) TextUnformatted("Processing image...");
+        if(*F::MenuBackground.Error())
+        {
+            PushStyleColor(ImGuiCol_Text,F::Render.Inactive.Value);
+            TextWrapped("%s",F::MenuBackground.Error());
+            PopStyleColor();
+        }
+        PushTransparent(!Enabled.Value);
+        FDropdown(Area);FDropdown(Fit);FColorPicker(Tint,FColorPickerEnum::Full);
+        FSlider(Opacity);FSlider(Blur);
+        FTooltip("Gaussian image blur. Loading and image processing run in the background.");
+        PopTransparent();
+    }
+    else
+    {
+        PushTransparent(!Enabled.Value);
+        FSlider(Scale);FSlider(OffsetX);FSlider(OffsetY);FSlider(Rotation);
+        FToggle(FlipX);FToggle(FlipY);
+        FSlider(Brightness);FSlider(Contrast);FSlider(Saturation);
+        FSlider(Dim);FSlider(Vignette);FSlider(Parallax);FSlider(Panels);
+        FColorPicker(GradientTop,FColorPickerEnum::Full);FColorPicker(GradientBottom,FColorPickerEnum::Full);
+        PopTransparent();
+    }
+}
+
 static void VisualsMenu()
 {
 	if (!PageTable("VisualsMenu", 2))
@@ -801,6 +873,11 @@ static void VisualsMenu()
 		FKeybind(Vars::Menu::SecondaryKey, FButtonEnum::None, { Vars::Menu::PrimaryKey[DEFAULT_BIND], VK_LBUTTON, VK_RBUTTON });
 	} EndSection();
 
+	if (Section("Background image"))
+	{
+		BackgroundImageSettings(false);
+	} EndSection();
+
 	TableNextColumn();
 	if (Section("Indicators"))
 	{
@@ -809,6 +886,10 @@ static void VisualsMenu()
 			H::Fonts.Reload();
 		if (FToggle(Vars::Menu::CheapText))
 			H::Fonts.Reload();
+	} EndSection();
+	if (Section("Background customization"))
+	{
+		BackgroundImageSettings(true);
 	} EndSection();
 	if (Vars::Debug::Options.Value)
 	{
@@ -950,6 +1031,8 @@ static void HvHAngles()
 		PushTransparent(!Vars::Resolver::Enabled.Value);
 		{
 			FToggle(Vars::Resolver::AutoResolve);
+			FToggle(Vars::Resolver::AnimationHypotheses);
+			FTooltip("Replay missing simulation ticks with interpolated movement, animation events and persistent yaw hypotheses. Shot feedback is tied to the hypothesis used to build its bones.");
 			PushTransparent(Transparent || !Vars::Resolver::AutoResolve.Value);
 			{
 				FToggle(Vars::Resolver::AutoResolveCheatersOnly);

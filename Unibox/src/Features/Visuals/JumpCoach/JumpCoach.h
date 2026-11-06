@@ -30,6 +30,7 @@ class CJumpCoach
     uint64_t m_generation=0; // Written only by the game thread, copied into snapshots.
     // Render-thread-owned history; Reset never touches these buffers.
     JumpCoach::SmoothedPath<Vec3> m_renderPath,m_renderIdeal;
+    JumpCoach::SmoothedLanding<Vec3> m_renderLanding,m_renderIdealLanding;
     uint64_t m_renderTime=0,m_renderGeneration=0;
     JumpCoach::End m_renderEnd=JumpCoach::End::Invalid;
     float m_renderHorizon=0;

@@ -1,6 +1,7 @@
 #pragma once
 #include "../../SDK/SDK.h"
 #include "../ImGui/IndicatorCache.h"
+#include "../Aimbot/Shared/BurstPlanner.h"
 
 class CTicks
 {
@@ -25,6 +26,13 @@ private:
 
 	void ManagePacket(CUserCmd* pCmd);
 
+	Burst::Plan m_burstSchedule;
+	CHandle<CTFWeaponBase> m_hBurstWeapon;
+	CHandle<CBaseEntity> m_hBurstTarget;
+	bool m_bBurstWithheld = false;
+	void CancelBurst();
+
+	bool m_bKnifeWarp = false;
 	bool m_bGoalReached = true;
 	Vec3 m_vShootPos = {};
 	std::optional<Vec3> m_vShootAngle = std::nullopt;
@@ -38,6 +46,15 @@ public:
 	void CacheDrawInfo(CTFPlayer* pLocal);
 	void Draw();
 	void Reset();
+	int AvailableKnifeWarpTicks() const;
+	bool BeginKnifeWarp(int extraTicks);
+	void StopKnifeWarp();
+	void CancelKnifeAttack();
+	bool KnifeWarpActive() const {return m_bKnifeWarp;}
+	void BeginBurstCommand(CTFPlayer* local, CTFWeaponBase* weapon, CUserCmd* command);
+	void EnforceBurstCommand(CTFPlayer* local, CTFWeaponBase* weapon, CUserCmd* command);
+	bool BurstWithheld() const { return m_bBurstWithheld; }
+	CBaseEntity* BurstTarget() const { return m_burstSchedule.valid ? m_hBurstTarget.Get() : nullptr; }
 
 	void Start(CTFPlayer* pLocal, CUserCmd* pCmd);
 	void End(CTFPlayer* pLocal, CUserCmd* pCmd);
@@ -45,6 +62,7 @@ public:
 	void AntiWarp(CTFPlayer* pLocal, float flYaw, float& flForwardMove, float& flSideMove, int iTicks);
 	void AntiWarp(CTFPlayer* pLocal, float flYaw, float& flForwardMove, float& flSideMove);
 	void AntiWarp(CTFPlayer* pLocal, CUserCmd* pCmd);
+	void PredictAntiWarp(float yaw,float& forward,float& side,int remaining,int total,const Vec3* initialVelocity=nullptr) const;
 
 	bool CanChoke(bool bCanShift, int iMaxTicks);
 	bool CanChoke(bool bCanShift = false);

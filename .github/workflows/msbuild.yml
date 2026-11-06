@@ -3,6 +3,21 @@ name: MSBuild
 on: [push, pull_request]
 
 jobs:
+  aim-policies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate local build cache and installation
+        run: python3 tests/build_local_dll_test.py
+      - name: Validate aimbot policies and command schedules
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test in aim_policy burst_planner seam_geometry splash_window animation_timeline sticky_search auto_trolldier spy_knife jump_coach jump_coach_smoothing menu_background; do
+            g++ -std=c++20 -O2 -Wall -Wextra -Werror "tests/${test}_test.cpp" -o "${RUNNER_TEMP}/${test}_test"
+            "${RUNNER_TEMP}/${test}_test"
+          done
+
   msbuild:
     runs-on: windows-latest
 

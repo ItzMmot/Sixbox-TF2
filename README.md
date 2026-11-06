@@ -19,6 +19,8 @@ A TF2 client with more shaders than reasonable life choices.
 
 <sub>FreeType + AVX2 nightly builds automatically from master. Fresh DLL, same questionable decisions.</sub>
 
+Local build: `./build.sh` · [Linux / Proton setup](docs/building.md)
+
 *terry davis is a god*<br>
 *larping gives me power*
 

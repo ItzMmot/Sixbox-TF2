@@ -203,6 +203,33 @@ NAMESPACE_BEGIN(Vars)
 		CVar(TextGlowStrength, "Text glow strength", 0.f, VISUAL | NOBIND | DEBUGVAR | SLIDER_CLAMP | SLIDER_NOAUTOUPDATE, 0.f, 200.f, 5.f, "%g%%");
 		CVar(TextGlowRadius, "Text glow radius", 4.f, VISUAL | NOBIND | DEBUGVAR | SLIDER_CLAMP | SLIDER_PRECISION | SLIDER_NOAUTOUPDATE, 0.f, 12.f, 0.25f, "%gpx");
 
+		NAMESPACE_BEGIN(BackgroundImage)
+			CVar(Enabled, "Image background", false, VISUAL | NOBIND);
+			CVar(Path, "Image file", std::string(), VISUAL | NOBIND);
+			CVarEnum(Area, "Image area", 0, VISUAL | NOBIND, nullptr,
+				VA_LIST("Menu body", "Content", "Screen"), Body, Content, Screen);
+			CVarEnum(Fit, "Image placement", 0, VISUAL | NOBIND, nullptr,
+				VA_LIST("Cover", "Contain", "Stretch", "Tile"), Cover, Contain, Stretch, Tile);
+			CVar(Tint, "Image tint", Color_t(255,255,255,255), VISUAL | NOBIND);
+			CVar(Opacity, "Image opacity", .85f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+			CVar(Blur, "Image blur", 0.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 16.f, .5f);
+			CVar(Scale, "Image scale", 1.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .25f, 3.f, .05f);
+			CVar(OffsetX, "Image offset X", 0.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, -1.f, 1.f, .05f);
+			CVar(OffsetY, "Image offset Y", 0.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, -1.f, 1.f, .05f);
+			CVar(Rotation, "Image rotation", 0.f, VISUAL | NOBIND | SLIDER_CLAMP, -180.f, 180.f, 5.f);
+			CVar(FlipX, "Mirror image", false, VISUAL | NOBIND);
+			CVar(FlipY, "Flip image vertically", false, VISUAL | NOBIND);
+			CVar(Brightness, "Image brightness", 1.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 2.f, .05f);
+			CVar(Contrast, "Image contrast", 1.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 2.f, .05f);
+			CVar(Saturation, "Image saturation", 1.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 2.f, .05f);
+			CVar(Dim, "Image dimming", .25f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+			CVar(Vignette, "Image vignette", .25f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+			CVar(Parallax, "Mouse parallax", 0.f, VISUAL | NOBIND | SLIDER_CLAMP, 0.f, 40.f, 2.f);
+			CVar(Panels, "Panel opacity over image", .65f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+			CVar(GradientTop, "Image gradient top", Color_t(14,16,22,0), VISUAL | NOBIND);
+			CVar(GradientBottom, "Image gradient bottom", Color_t(14,16,22,0), VISUAL | NOBIND);
+		NAMESPACE_END(BackgroundImage)
+
 		NAMESPACE_BEGIN(Theme)
 			CVar(Accent, "Accent color", Color_t(190, 44, 58, 255), VISUAL);
 			CVar(Background, "Background color", Color_t(21, 14, 16, 255), VISUAL);
@@ -338,6 +365,8 @@ NAMESPACE_BEGIN(Vars)
 			CVarEnum(Modifiers, VA_LIST("Modifiers", "Hitscan modifiers"), 0b0100000, DROPDOWN_MULTI, nullptr,
 				VA_LIST("Tapfire", "Wait for headshot", "Wait for charge", "Scoped only", "Auto scope", "Auto rev minigun", "Extinguish team", "Prefer medics"),
 				Tapfire = 1 << 0, WaitForHeadshot = 1 << 1, WaitForCharge = 1 << 2, ScopedOnly = 1 << 3, AutoScope = 1 << 4, AutoRev = 1 << 5, ExtinguishTeam = 1 << 6, PreferMedics = 1 << 7);
+			CVar(PelletOptimization, "Pellet-aware aim", true);
+			CVar(BurstPlanning, "Burst shot planning", true);
 			CVar(MultipointScale, "Multipoint scale", 0.f, SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 100.f, 5.f, "%g%%");
 			CVar(TapfireDistance, "Tapfire distance", 1000.f, SLIDER_MIN | SLIDER_PRECISION, 250.f, 1000.f, 50.f);
 
@@ -377,6 +406,8 @@ NAMESPACE_BEGIN(Vars)
 			CVarEnum(Modifiers, VA_LIST("Modifiers", "Projectile modifiers"), 0b011111, DROPDOWN_MULTI, nullptr,
 				VA_LIST("Charge weapon", "Cancel charge", "Use arm time", "Air splash", "Lob angles", "Target dormant"),
 				ChargeWeapon = 1 << 0, CancelCharge = 1 << 1, UseArmTime = 1 << 2, AirSplash = 1 << 3, LobAngles = 1 << 4, TargetDormant = 1 << 5);
+			CVar(SplashOptimization, "Splash damage optimization", true);
+			CVar(HuntsmanSafePoint, "Huntsman head safe point", true);
 			CVar(MaxSimulationTime, "Max simulation time", 2.5f, SLIDER_MIN | SLIDER_PRECISION, 0.1f, 2.5f, 0.25f, "%gs");
 			CVar(HitChance, "Hit chance", 0.f, SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 100.f, 10.f, "%g%%");
 			CVar(AutodetRadius, "Autodet radius", 90.f, SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 100.f, 10.f, "%g%%");
@@ -486,7 +517,19 @@ NAMESPACE_BEGIN(Vars)
 
 		NAMESPACE_BEGIN(Melee)
 			CVar(AutoBackstab, "Auto backstab", true);
+			CVar(KnifePrecision, "Precise knife", true);
+			CVar(BackstabSafety, "Backstab safety", .75f, SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+			CVar(AutoTrickstab, "Auto trickstabs", false);
+			CVarEnum(TrickstabMode, "Trickstab mode", 0, NONE, nullptr,
+				VA_LIST("Auto", "Sidestab", "Matador"), Auto, Sidestab, Matador);
+			CVar(TrickstabPrediction, "Trickstab prediction", .6f, SLIDER_CLAMP | SLIDER_PRECISION, .2f, .75f, .05f);
+			CVar(BackstabVisuals, "Backstab visualization", false);
+			CVar(BackstabPath, "Backstab route", true);
+
+			CVar(WarpBehind, "Warp behind", false);
+			CVar(WarpBehindDistance, "Warp search distance", 180.f, SLIDER_CLAMP, 48.f, 256.f, 8.f);
 			CVar(IgnoreRazorback, "Ignore razorback", false);
+			CVar(SwingMargin, "Swing timing margin", true);
 			CVar(SwingPrediction, "Swing prediction", true);
 			CVar(WhipTeam, "Whip team", false);
 
@@ -606,6 +649,7 @@ NAMESPACE_BEGIN(Vars)
 
 	NAMESPACE_BEGIN(Resolver)
 		CVar(Enabled, VA_LIST("Enabled", "Resolver enabled"), false);
+		CVar(AnimationHypotheses, "Animation yaw hypotheses", true);
 		CVar(AutoResolve, "Auto resolve", false);
 		CVar(AutoResolveCheatersOnly, "Auto resolve cheaters only", false);
 		CVar(AutoResolveHeadshotOnly, "Auto resolve headshot only", false);

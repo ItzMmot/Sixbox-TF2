@@ -159,10 +159,11 @@ void CEntities::UpdatePlayerAnimations(int nLocalIndex)
 	for (auto pEntity : vPlayers)
 	{
 		auto pPlayer = pEntity->As<CTFPlayer>();
-		if (!pPlayer->IsAlive()) continue;
+		if (!pPlayer->IsAlive() || pPlayer->IsDormant()) {F::Resolver.DiscardAnimation(pPlayer);continue;}
 		if (pPlayer->entindex() == nLocalIndex && !bPlayingDemo) // local player managed in CreateMove
 			continue;
 
+		if (F::Resolver.ReconstructAnimation(pPlayer)) continue;
 		bool bResolved = F::Resolver.GetAngles(pPlayer);
 		if (!bDisableinterpolation && !bResolved)
 			continue;

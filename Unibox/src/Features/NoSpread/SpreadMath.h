@@ -30,34 +30,33 @@ namespace SpreadMath
 		float m_flFirstRange = 0.5f;
 	};
 
-	inline std::vector<Pellet_t> GetPellets(const Shot_t& tShot)
+	inline Pellet_t GetPellet(const Shot_t& shot,int bullet)
 	{
-		std::vector<Pellet_t> vPellets;
-		vPellets.reserve(std::max(tShot.m_iBullets, 0));
-
-		CValve_Random tRandom = {};
-		for (int iBullet = 0; iBullet < tShot.m_iBullets; iBullet++)
+		float x=0,y=0;
+		if(shot.m_bFixed)
 		{
-			float x = 0.f, y = 0.f;
-			if (tShot.m_bFixed)
-			{
-				if (tShot.m_iBullets < 15)
-					x = aFixedPellets10[iBullet % 10][0] * 0.5f, y = aFixedPellets10[iBullet % 10][1] * 0.5f;
-				else
-					x = aFixedPellets15[iBullet % 15][0], y = aFixedPellets15[iBullet % 15][1];
-			}
-			else if (iBullet || !tShot.m_bFirstPerfect)
-			{
-				const float flRange = !iBullet ? tShot.m_flFirstRange : 0.5f;
-				tRandom.SetSeed(tShot.m_iSeed + iBullet);
-				x = tRandom.RandomFloat(-flRange, flRange);
-				x += tRandom.RandomFloat(-flRange, flRange);
-				y = tRandom.RandomFloat(-flRange, flRange);
-				y += tRandom.RandomFloat(-flRange, flRange);
-			}
-			vPellets.push_back({ x * tShot.m_flSpread, y * tShot.m_flSpread });
+			if(shot.m_iBullets<15) {x=aFixedPellets10[bullet%10][0]*.5f;y=aFixedPellets10[bullet%10][1]*.5f;}
+			else {x=aFixedPellets15[bullet%15][0];y=aFixedPellets15[bullet%15][1];}
 		}
-		return vPellets;
+		else if(bullet || !shot.m_bFirstPerfect)
+		{
+			CValve_Random random={};random.SetSeed(shot.m_iSeed+bullet);
+			const float range=bullet? .5f:shot.m_flFirstRange;
+			x=random.RandomFloat(-range,range);x+=random.RandomFloat(-range,range);
+			y=random.RandomFloat(-range,range);y+=random.RandomFloat(-range,range);
+		}
+		return {x*shot.m_flSpread,y*shot.m_flSpread};
+	}
+	inline int GetPellets(const Shot_t& shot,Pellet_t* output,int capacity)
+	{
+		const int count=std::clamp(shot.m_iBullets,0,(std::max)(capacity,0));
+		for(int i=0;i<count;++i) output[i]=GetPellet(shot,i);
+		return count;
+	}
+	inline std::vector<Pellet_t> GetPellets(const Shot_t& shot)
+	{
+		std::vector<Pellet_t> result((std::max)(shot.m_iBullets,0));
+		GetPellets(shot,result.data(),int(result.size()));return result;
 	}
 
 	inline Vec3 GetDirection(const Vec3& vAngles, const Pellet_t& tPellet)
@@ -68,6 +67,20 @@ namespace SpreadMath
 		return vDirection;
 	}
 
+	inline int ChoosePellet(const Pellet_t* pellets,int count,const Vec3& angles,bool firstPerfect)
+	{
+		if(count<=1 || firstPerfect) return 0;
+		Vec3 average={};
+		for(int i=0;i<count;++i) average+=GetDirection(angles,pellets[i]);
+		average/=float(count);
+		int best=0;float distance=std::numeric_limits<float>::max();
+		for(int i=0;i<count;++i)
+		{
+			const float value=GetDirection(angles,pellets[i]).DistToSqr(average);
+			if(value<distance) {distance=value;best=i;}
+		}
+		return best;
+	}
 	inline int ChoosePellet(const std::vector<Pellet_t>& vPellets, const Vec3& vAngles, bool bFirstPerfect)
 	{
 		if (vPellets.size() <= 1 || bFirstPerfect)

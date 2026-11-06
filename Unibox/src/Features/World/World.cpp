@@ -151,6 +151,10 @@ void CWorld::Cache()
 	CachePlaneBrushes();
 	CacheProps();
 	CacheEntities();
+	// Allocate brush query storage while constructing the map cache. Readers
+	// below never resize it or copy the cached polygons into heap containers.
+	if (I::BSPData && I::BSPData->numbrushes > 0)
+		m_vBrushStorage.resize(I::BSPData->numbrushes);
 }
 
 void CWorld::CacheBoxBrushes()
@@ -358,6 +362,7 @@ void CWorld::CacheEntities()
 
 void CWorld::Uncache()
 {
+	if (++m_iGeometryRevision==0) ++m_iGeometryRevision;
 	if (m_iNeedsCache == FaceTypeEnum::Cache)
 		return;
 
@@ -491,6 +496,104 @@ std::vector<Face_t> CWorld::GetFacesInAABB(const Vec3& vMins, const Vec3& vMaxs,
 	}
 
 	return vFaces;
+}
+
+int CWorld::GatherSeamFaces(const Vec3& mins,const Vec3& maxs,SeamGeometry::Face* output,int capacity)
+{
+	if (!output || capacity <= 0) return 0;
+	capacity = (std::min)(capacity,SeamGeometry::MaxFaces);
+	const Vec3 centre=(mins+maxs)*.5f;
+	std::array<float,SeamGeometry::MaxFaces> distances{};
+	int count=0;
+	auto add=[&](const Vec3* vertices,int size,Vec3 normal,const matrix3x4* transform=nullptr) {
+		if (!vertices || size<3 || size>SeamGeometry::MaxVertices) return;
+		SeamGeometry::Face face;face.count=size;
+		Vec3 low=Vec3::GetMax(),high=Vec3::GetMin();
+		for (int i=0;i<size;++i)
+		{
+			const Vec3 vertex=transform?Math::VectorTransform(vertices[i],*transform):vertices[i];
+			low=low.Min(vertex);high=high.Max(vertex);
+			face.vertices[i]={vertex.x,vertex.y,vertex.z};
+		}
+		if (!Math::IsBoxIntersectingBox(low,high,mins,maxs)) return;
+		if (transform)
+		{
+			const auto a=SeamGeometry::Sub(face.vertices[1],face.vertices[0]);
+			const auto b=SeamGeometry::Sub(face.vertices[2],face.vertices[0]);
+			const auto cross=SeamGeometry::Cross(a,b);
+			// Rotate the original outward normal; polygon winding is independent.
+			const Vec3 rotated={(*transform)[0][0]*normal.x+(*transform)[0][1]*normal.y+(*transform)[0][2]*normal.z,
+				(*transform)[1][0]*normal.x+(*transform)[1][1]*normal.y+(*transform)[1][2]*normal.z,
+				(*transform)[2][0]*normal.x+(*transform)[2][1]*normal.y+(*transform)[2][2]*normal.z};
+			normal=rotated.Normalized();
+			if (SeamGeometry::Dot(cross,cross)<1e-8f) return;
+		}
+		face.normal={normal.x,normal.y,normal.z};
+		if (!SeamGeometry::Valid(face)) return;
+		const float distance=centre.DistToSqr(centre.Clamp(low,high));
+		int slot=count;
+		if (count==capacity)
+		{
+			slot=0;
+			for (int i=1;i<count;++i) if (distances[i]>distances[slot]) slot=i;
+			if (distance>=distances[slot]) return;
+		}
+		else ++count;
+		output[slot]=face;distances[slot]=distance;
+	};
+	if (I::BSPData && I::BSPData->numbrushes>0
+		&& m_vBrushStorage.size()>=size_t(I::BSPData->numbrushes))
+	{
+		CUtlVector<int> brushes(m_vBrushStorage.data(),int(m_vBrushStorage.size()));
+		I::EngineTrace->GetBrushesInAABB(mins,maxs,&brushes,MASK_SOLID);
+		for (int i=0;i<brushes.Count();++i)
+		{
+			if (brushes[i]<0 || brushes[i]>=I::BSPData->numbrushes) continue;
+			auto it=m_mFaceCache.find(&I::BSPData->map_brushes[brushes[i]]);
+			if (it==m_mFaceCache.end()) continue;
+			for (const auto& face:it->second) add(face.m_vVertices.data(),int(face.m_vVertices.size()),face.m_vNormal);
+		}
+	}
+	if (I::DispCollTrees && *I::DispCollTrees && I::DispCollTreeCount)
+	{
+		for (int i=0;i<*I::DispCollTreeCount;++i)
+		{
+			auto& tree=(*I::DispCollTrees)[i];
+			if (!Math::IsBoxIntersectingBox(mins,maxs,tree.m_mins,tree.m_maxs)) continue;
+			for (int j=0;j<tree.GetFaceCount();++j)
+			{
+				auto& tri=tree.m_aTris[j];
+				const Vec3 vertices[]={tree.m_aVerts[tri.GetVert(0)],tree.m_aVerts[tri.GetVert(1)],tree.m_aVerts[tri.GetVert(2)]};
+				add(vertices,3,tri.m_vecNormal);
+			}
+		}
+	}
+	class Enumerator final:public IPartitionEnumerator
+	{
+	public:
+		std::array<IHandleEntity*,256> entries{};int count=0;
+		IterationRetval_t EnumElement(IHandleEntity* entity) override
+		{
+			if (count<int(entries.size())) entries[count++]=entity;
+			return ITERATION_CONTINUE;
+		}
+	} entities;
+	if (I::SpatialPartition)
+		I::SpatialPartition->EnumerateElementsInBox(I::EngineTrace->SpatialPartitionMask(),mins,maxs,false,&entities);
+	for (int i=0;i<entities.count;++i)
+	{
+		auto* entity=entities.entries[i];if (!entity) continue;
+		const bool prop=I::StaticPropMgr->IsStaticProp(entity);
+		auto* base=prop?nullptr:reinterpret_cast<CBaseEntity*>(entity);
+		if (base && (base->IsPlayer() || !base->GetAbsVelocity().IsZero())) continue;
+		auto* collide=prop?I::StaticPropMgr->GetStaticProp(entity):base->GetCollideable();
+		if (!collide || !collide->IsSolid()) continue;
+		auto it=m_mFaceCache.find(I::ModelInfoClient->GetVCollide(collide->GetCollisionModel()));
+		if (it==m_mFaceCache.end()) continue;
+		for (const auto& face:it->second)
+			add(face.m_vVertices.data(),int(face.m_vVertices.size()),face.m_vNormal,&collide->CollisionToWorldTransform());
+	}
+	return count;
 }
 
 #ifdef WORLD_DEBUG

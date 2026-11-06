@@ -1,4 +1,7 @@
 #pragma once
+#include "../Shared/SeamGeometry.h"
+#include "../Shared/SplashWindow.h"
+#include "../Shared/StickySearch.h"
 #include "../../../SDK/SDK.h"
 
 #include "../AimbotGlobal/AimbotGlobal.h"
@@ -75,6 +78,7 @@ struct Offset_t
 {
 	Vec3 m_vOffset;
 	uint8_t m_iFlags;
+	uint8_t m_iSamples=0;
 };
 using Directs_t = std::unordered_map<uint8_t, Offset_t>;
 using Splashes_t = std::vector<uint8_t>;
@@ -91,6 +95,7 @@ struct Direct_t : History_t
 	float m_flTime;
 	Vec3 m_vPoint;
 	int m_iPriority;
+	int m_iAttempt=0;
 };
 struct Splash_t : History_t
 {
@@ -117,6 +122,7 @@ class CAimbotProjectile
 {
 private:
 	Directs_t GetDirects();
+	void BuildDirects(Directs_t* output);
 	Splashes_t GetSplashes();
 	void SetupSplashPoints(Vec3& vOrigin, std::vector<Setup_t>& vSplashPoints, uint8_t iFlags = CalculateFlagsEnum::None);
 	std::vector<Point_t> GetSplashPoints(Vec3 vOrigin, std::vector<Setup_t>& vSplashPoints, int iSimTime, uint8_t iFlags = CalculateFlagsEnum::Accuracy, bool bFirst = false);
@@ -124,9 +130,19 @@ private:
 	void CalculateAngle(const Vec3& vLocalPos, const Vec3& vTargetPos, int iSimTime, Solution_t& tOut, uint8_t iFlags = CalculateFlagsEnum::Accuracy, int iTolerance = -1);
 	bool TestAngle(const Vec3& vPoint, const Vec3& vAngles, int iSimTime, uint8_t iType, uint8_t iFlags, bool bSecondTest = false);
 
-	bool HandlePoint(const Vec3& vOrigin, int iSimTime, float flPitch, float flYaw, float flTime, const Vec3& vPoint, uint8_t iType = PointTypeEnum::Direct, uint8_t iFlags = PointFlagsEnum::Regular);
+	bool HandlePoint(const Vec3& vOrigin, int iSimTime, float flPitch, float flYaw, float flTime, const Vec3& vPoint, uint8_t iType = PointTypeEnum::Direct, uint8_t iFlags = PointFlagsEnum::Regular,float roll=0.f);
 	bool HandleDirect(DirectHistory_t& vDirectHistory);
 	bool HandleSplash(SplashHistory_t& vSplashHistory);
+	std::array<SeamGeometry::Face,SeamGeometry::MaxFaces> m_aSeamFaces{};
+	struct SeamAim {Vec3 angles{},start{},velocity{},direction{},hull{};float speed=0,lifetime=0;};
+	bool AimSplashContact(const Vec3& point,SeamAim& result);
+	bool SplashDamageVisible(const Vec3& origin,const Vec3& targetOrigin);
+	bool SearchSplashSeams(const Splash_t& frame,uint8_t mode,uint8_t flags);
+	bool m_bSeamValidation=false;
+	float m_flVerifiedContactTime=0;
+	Vec3 m_vVerifiedContactTarget{};
+	int m_iSeamSetups=0,m_iSeamShots=0;
+	bool HandleSplashLegacy(SplashHistory_t& vSplashHistory);
 
 	int CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pWeapon, bool bUpdate = true);
 	bool RunMain(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd);
@@ -141,6 +157,60 @@ private:
 
 	bool Aim(const Vec3& vCurAngle, const Vec3& vToAngle, Vec3& vOut);
 	void Aim(CUserCmd* pCmd, Vec3& vAngles);
+
+	void BeginSearch();
+	bool ExtraSearchAvailable();
+	int64_t m_iExtraDeadline=0;
+	int m_iExtraFrame=-1;
+	bool HeadFirst(const Vec3& point,const Vec3& velocity,const Vec3& predictedOrigin,bool contact=false) const;
+	bool FindHeadPoint(const Vec3& predictedOrigin,int tick,uint8_t flags,Vec3& point,Solution_t& solution);
+	matrix3x4* m_pHeadBones=nullptr;
+	std::array<matrix3x4,MAXSTUDIOBONES> m_aHeadSnapshot{};
+	mstudiohitboxset_t* m_pHeadSet=nullptr;
+	Vec3 m_vHeadOrigin={};
+	int m_iWorkCommand=-1,m_iAngleTests=0,m_iRefineTraces=0,m_iSeamPairs=0;
+	float m_flBestSplashScore=0,m_flTargetSpeed=0,m_flTargetTurnRate=0;
+	Vec3 m_vVerifiedImpact={},m_vVerifiedNormal={},m_vBestImpact={},m_vBestNormal={};
+	struct SplashSeed
+	{
+		CHandle<CBaseEntity> target;
+		Vec3 point,origin;
+		int command=-1,weapon=-1;
+	};
+	std::array<SplashSeed,8> m_aSplashSeeds{};
+	struct StickyCandidate {Vec3 point{},normal{};uint8_t type=0,arcs=0;bool relative=false;int priority=0;};
+	struct StickyFlight
+	{
+		std::array<Vec3,StickySearch::MaxTicks+1> path{};
+		Vec3 error{},contact{},normal{};
+		float distance=std::numeric_limits<float>::max(),impactTime=0.f;
+		int count=0,closest=0,command=-1,airSamples=0;
+		std::array<int,8> airTicks{};
+		bool hit=false,sky=false;
+	};
+	struct StickyState
+	{
+		StickySearch::Cursor cursor{};
+		std::array<StickyCandidate,StickySearch::MaxCandidates> candidates{};
+		int count=0,horizon=0,bestAirCursor=0;
+		Vec3 angles{},pitchError{},yawError{},proposed{};
+		StickyFlight flight{};
+	};
+	std::array<StickyState,16> m_aStickySearch{};
+	StickyFlight m_stickyTrial{};
+	std::array<StickyCandidate,16> m_aStickyDirectSeeds{};
+	int m_iStickyDirectSeedCount=0;
+	StickySearch::Work m_stickyWork{};
+	int m_iStickyPredictionBase=0;
+	bool m_bStickyValidation=false,m_bStickyPathBorrowed=false;
+	std::vector<Vec3> m_stickyValidationPath;
+	alignas(16) std::array<byte,131072> m_aStickyMoveScratch{};
+	void ResetMoveStorage();
+	void ReleaseStickyPath();
+	Vec3 StickyTargetAt(int tick) const;
+	void DiscoverSticky(StickyState& state);
+	bool FlySticky(StickyState& state,const StickyCandidate& candidate,const Vec3& angles,StickyFlight& flight);
+	bool SearchSticky();
 
 	Info_t m_tInfo = {};
 	MoveStorage m_tMoveStorage = {};
@@ -250,6 +320,14 @@ private:
 	CObjectSentrygun* m_pSentryGun = nullptr;
 
 public:
+	CAimbotProjectile()
+	{
+		m_tMoveStorage.m_vPath.reserve(StickySearch::MaxTicks+256);
+		m_stickyValidationPath.reserve(StickySearch::MaxTicks+1);
+		m_vPlayerPath.reserve(StickySearch::MaxTicks+256);
+		m_vBestPlayerPath.reserve(StickySearch::MaxTicks+256);
+		m_vProjectilePath.reserve(StickySearch::MaxTicks+1);
+	}
 	void ResetMainSearch() { m_bMainSearchComplete = false; }
 	void Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd);
 	void RunPreview(CTFPlayer* pLocal, CTFWeaponBase* pWeapon);

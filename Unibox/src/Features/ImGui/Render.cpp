@@ -1,5 +1,7 @@
 #ifndef TEXTMODE
 #include "Render.h"
+#include "Background/MenuBackground.h"
+#include "../Aimbot/SpyKnife/SpyKnife.h"
 #include "../Visuals/Aura/Aura.h"
 #include "../Visuals/JumpCoach/JumpCoach.h"
 
@@ -24,6 +26,7 @@
 
 void CRender::Render(IDirect3DDevice9* pDevice)
 {
+    auto backgroundFrame=F::MenuBackground.LockFrame();
 	if (m_pDevice && pDevice != m_pDevice && m_bLoaded)
 	{
 		F::CaptureOverlay.ReleaseDeviceObjects();
@@ -71,6 +74,7 @@ void CRender::Render(IDirect3DDevice9* pDevice)
 
 	F::Menu.m_bInputReady = !bAntiObs || bPrivate || bUnsupported;
 
+	F::MenuBackground.Update(pDevice);
 	F::Menu.Render();
     if (I::EngineClient->IsInGame() && bDrawGame && !bPrivate && !bTransient && !SDK::CleanScreenshot() && !I::EngineVGui->IsGameUIVisible())
         F::Aura.Render(pDevice);
@@ -94,6 +98,7 @@ void CRender::Render(IDirect3DDevice9* pDevice)
 		F::Backtrack.Draw();
 		F::NavRender.DrawIndicators();
         if(!I::EngineVGui->IsGameUIVisible()) F::JumpCoach.DrawHUD();
+        F::SpyKnife.DrawHUD();
 
 		F::ESP.Draw(pBackground);
 		F::Aimbot.Draw(pBackground);

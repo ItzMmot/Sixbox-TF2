@@ -1,4 +1,5 @@
 #include "Backtrack.h"
+#include "../Resolver/Resolver.h"
 
 #include "../PacketManip/FakeLag/FakeLag.h"
 #include "../Ticks/Ticks.h"
@@ -229,12 +230,17 @@ std::vector<TickRecord*> CBacktrack::GetValidRecords(std::vector<TickRecord*>& v
 	return vReturn;
 }
 
-matrix3x4* CBacktrack::GetBones(CBaseEntity* pEntity)
+TickRecord* CBacktrack::GetLatestRecord(CBaseEntity* entity)
 {
-	std::vector<TickRecord*> vRecords = {};
-	if (F::Backtrack.GetRecords(pEntity, vRecords) && !vRecords.empty())
-		return vRecords.front()->m_aBones;
+	auto it=m_mRecords.find(entity);
+	if(it==m_mRecords.end()) return nullptr;
+	for(auto& record:it->second) if(!record.m_bInvalid) return &record;
 	return nullptr;
+}
+matrix3x4* CBacktrack::GetBones(CBaseEntity* entity)
+{
+	auto it=m_mRecords.find(entity);
+	return it!=m_mRecords.end()&&!it->second.empty()?it->second.front().m_aBones:nullptr;
 }
 
 static matrix3x4 s_aBones[MAXSTUDIOBONES];
@@ -276,6 +282,7 @@ void CBacktrack::MakeRecords()
 			pPlayer->m_vecMaxs(),
 			m_mDidShoot[pPlayer->entindex()]
 		};
+		tCurRecord.m_tResolverIdentity=F::Resolver.AnimationIdentity(pPlayer);
 		memcpy(tCurRecord.m_aBones, s_aBones, sizeof(tCurRecord.m_aBones));
 		const bool bHasLastRecord = !vRecords.empty();
 		const Vec3 vLastOrigin = bHasLastRecord ? vRecords.front().m_vOrigin : Vec3();
@@ -359,7 +366,10 @@ void CBacktrack::Store()
 
 void CBacktrack::ResolverUpdate(CBaseEntity* pEntity)
 {
-
+	if (pEntity && pEntity->IsPlayer()) F::Resolver.InvalidateIdentity(pEntity->As<CTFPlayer>());
+	// Bones reconstructed with an old hypothesis cannot validate the new one.
+	auto it=m_mRecords.find(pEntity);
+	if(it!=m_mRecords.end()) for(auto& record:it->second) record.m_bInvalid=true;
 }
 
 void CBacktrack::ReportShot(int iIndex)

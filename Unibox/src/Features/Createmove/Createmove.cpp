@@ -1,4 +1,5 @@
 #include "Createmove.h"
+#include "../Aimbot/SpyKnife/SpyKnife.h"
 #ifndef TEXTMODE
 #include "../Visuals/JumpCoach/JumpCoach.h"
 #endif
@@ -66,6 +67,7 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	auto pLocal = H::Entities.GetLocal();
 	if (!pLocal)
 	{
+		F::SpyKnife.Reset(true);
 		F::AutoRocketJump.Reset();
 		F::AutoTrolldier.Reset();
 #ifndef TEXTMODE
@@ -79,6 +81,7 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	I::Prediction->Update(I::ClientState->m_nDeltaTick, I::ClientState->m_nDeltaTick > 0, I::ClientState->last_command_ack, I::ClientState->lastoutgoingcommand + I::ClientState->chokedcommands);
 
 	UpdateInfo(pLocal, pWeapon, pCmd);
+	F::Resolver.BeginCommand();
 #ifndef TEXTMODE
 	F::Spectate.CreateMove(pCmd);
 #endif
@@ -94,15 +97,19 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	F::AutoRocketJump.Prepare(pLocal, pWeapon, pCmd);
 	F::AutoTrolldier.UpdateAutomation(pLocal, pWeapon, pCmd);
 	F::AutoTrolldier.Prepare(pLocal, pWeapon, pCmd);
+	F::SpyKnife.Prepare(pLocal,pWeapon,pCmd);
+	F::Ticks.BeginBurstCommand(pLocal, pWeapon, pCmd);
 	F::Ticks.Start(pLocal, pCmd);
 	{
 		if (!F::AutoTrolldier.SuppressCombat())
 			F::Aimbot.Run(pLocal, pWeapon, pCmd);
 		F::AutoTrolldier.AfterAim(pLocal, pWeapon, pCmd);
+		F::Ticks.EnforceBurstCommand(pLocal, pWeapon, pCmd);
 	}
 	F::Ticks.End(pLocal, pCmd);
+	F::SpyKnife.AfterAim(pLocal,pWeapon,pCmd);
 	{
-		if (!F::AutoTrolldier.IsActive(pCmd))
+		if (!F::AutoTrolldier.IsActive(pCmd)&&!F::SpyKnife.Controls(pCmd))
 		{
 			F::FollowBot.Run(pLocal, pCmd);
 			F::NavBotCore.Run(pLocal, pWeapon, pCmd);
@@ -118,10 +125,14 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 		F::Misc.AutoFaNJump(pLocal, pWeapon, pCmd);
 		F::AutoTrolldier.RotateCamera(pLocal, pCmd);
 		F::AutoTrolldier.ApplyMovement(pCmd);
+		F::SpyKnife.ApplyMovement(pLocal,pWeapon,pCmd);
+		F::Ticks.EnforceBurstCommand(pLocal, pWeapon, pCmd);
 		F::PacketManip.Run(pLocal, pWeapon, pCmd);
 		F::Ticks.CreateMove(pLocal, pWeapon, pCmd);
 		F::AntiAim.Run(pLocal, pWeapon, pCmd);
 		F::AntiCheatCompatibility.CreateMove(pCmd);
+		F::SpyKnife.Finalize(pLocal,pWeapon,pCmd);
+		F::Resolver.CommitShot(pLocal,pWeapon,pCmd);
 		
 #ifndef TEXTMODE
 		F::Visuals.CreateMove(pLocal, pWeapon, pCmd);

@@ -2,6 +2,8 @@
 #include "../../../SDK/SDK.h"
 #include "../../ImGui/IndicatorCache.h"
 
+namespace SpreadMath {struct Pellet_t;}
+
 //#define SEEDPRED_DEBUG
 
 class CNoSpreadHitscan
@@ -23,6 +25,8 @@ private:
 	bool IsFixedSpread(CTFWeaponBase* pWeapon);
 	std::string GetFormat(int iServerTime);
 
+	int m_iPatternCommand=-1,m_iPatternTick=-1;
+	CTFWeaponBase* m_pPatternWeapon=nullptr;
 	bool m_bWaitingForPlayerPerf = false;
 	int m_bSynced = 0;
 	double m_dRequestTime = 0.0;
@@ -32,6 +36,7 @@ private:
 
 public:
 	void Reset();
+	int BuildAimPattern(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* cmd,SpreadMath::Pellet_t* output,int capacity,SpreadMath::Pellet_t& correction,bool& exact);
 
 	void AskForPlayerPerf();
 	bool ParsePlayerPerf(const std::string& sMsg);

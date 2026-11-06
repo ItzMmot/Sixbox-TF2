@@ -2,6 +2,7 @@
 #include "../../SDK/SDK.h"
 #include "../ImGui/IndicatorCache.h"
 #include <optional>
+#include "../Aimbot/Shared/AnimationTimeline.h"
 
 struct Sequence_t
 {
@@ -25,6 +26,7 @@ struct TickRecord
 	Vec3 m_vMaxs = {};
 	bool m_bOnShot = false;
 	bool m_bInvalid = false;
+	AnimationTimeline::Identity m_tResolverIdentity{};
 	matrix3x4 m_aBones[MAXSTUDIOBONES];
 };
 
@@ -68,6 +70,7 @@ public:
 	bool GetRecords(CBaseEntity* pEntity, std::vector<TickRecord*>& vReturn);
 	std::vector<TickRecord*> GetValidRecords(std::vector<TickRecord*>& vRecords, CTFPlayer* pLocal = nullptr, bool bDistance = false, float flTimeMod = 0.f);
 	matrix3x4* GetBones(CBaseEntity* pEntity);
+	TickRecord* GetLatestRecord(CBaseEntity* entity);
 
 	float GetReal(int iFlow = MAX_FLOWS, bool bNoFake = true);
 	float GetWishFake();

@@ -11,6 +11,9 @@ struct MoveStorage
 	CTFPlayer* m_pPlayer = nullptr;
 	CMoveData m_MoveData = {};
 	byte* m_pData = nullptr;
+	byte* m_pExternalData=nullptr;
+	size_t m_nExternalBytes=0;
+	bool m_bStorePath=true;
 
 	float m_flAverageYaw = 0.f;
 	bool m_bBunnyHop = false;
@@ -50,7 +53,7 @@ struct MoveYawState
 class CMovementSimulation
 {
 private:
-	void Store(MoveStorage& tMoveStorage);
+	bool Store(MoveStorage& tMoveStorage);
 	void Reset(MoveStorage& tMoveStorage);
 
 	void SetupMoveData(MoveStorage& tMoveStorage);

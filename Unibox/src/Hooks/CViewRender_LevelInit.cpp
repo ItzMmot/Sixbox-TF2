@@ -1,4 +1,5 @@
 #include "../SDK/SDK.h"
+#include "../Features/Aimbot/SpyKnife/SpyKnife.h"
 
 #include "../Features/Visuals/Materials/Materials.h"
 #include "../Features/Visuals/Visuals.h"
@@ -29,6 +30,7 @@ MAKE_HOOK(CViewRender_LevelInit, U::Memory.GetVirtual(I::ViewRender, 1), void,
 	F::Spectate.Reset();
 #endif
 
+	F::SpyKnife.Reset(true);
 	F::Backtrack.Reset();
 	F::Ticks.Reset();
 	F::NoSpreadHitscan.Reset();

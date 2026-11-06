@@ -21,11 +21,15 @@ private:
 
 	CMoveData m_tMoveData = {};
 	DatamapRestore_t m_tLocal = {};
+	CHandle<CTFPlayer> m_hSnapshotOwner;
+	bool m_bSnapshotValid = false;
 	std::unordered_map<CTFPlayer*, RestoreInfo_t> m_mRestore = {};
 
 public:
 	void Start(CTFPlayer* pLocal, CUserCmd* pCmd);
 	void End(CTFPlayer* pLocal, CUserCmd* pCmd);
+	// Restore the pre-command player state without ending the prediction scope.
+	bool RestoreSimulationBase(CTFPlayer* player) const;
 
 	void Unload();
 

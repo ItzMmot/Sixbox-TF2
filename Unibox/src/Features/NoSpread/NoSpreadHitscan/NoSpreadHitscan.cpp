@@ -18,6 +18,7 @@ void CNoSpreadHitscan::Reset()
 	m_dTimeDelta = 0.0;
 
 	m_iSeed = 0;
+	m_iPatternCommand=m_iPatternTick=-1;m_pPatternWeapon=nullptr;
 	m_flMantissaStep = 0.f;
 
 	m_bSynced = false;
@@ -145,49 +146,61 @@ bool CNoSpreadHitscan::ParsePlayerPerf(const std::string& sMsg)
 	return std::regex_match(sMsg, std::regex(R"(\d+.\d+\s\d+\s\d+)"));
 }
 
+int CNoSpreadHitscan::BuildAimPattern(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* cmd,
+	SpreadMath::Pellet_t* output,int capacity,SpreadMath::Pellet_t& correction,bool& exact)
+{
+	correction={};exact=false;
+	if(!local||!weapon||!cmd||!output||capacity<=0) return 0;
+	const int bullets=weapon->GetBulletsPerShot();
+	const float spread=weapon->GetWeaponSpread();
+	if(bullets<=0||bullets>32||!std::isfinite(spread)||spread<=0) return 0;
+	const bool fixed=IsFixedSpread(weapon);
+	static auto customSeed=H::ConVars.FindVar("sv_usercmd_custom_random_seed");
+	exact=fixed||(m_bSynced&&Vars::Aimbot::General::NoSpread.Value)||(customSeed&&!customSeed->GetBool());
+	if(m_iPatternCommand!=cmd->command_number || m_iPatternTick!=local->m_nTickBase() || m_pPatternWeapon!=weapon)
+	{
+		m_iSeed=GetSeed(cmd);m_iPatternCommand=cmd->command_number;
+		m_iPatternTick=local->m_nTickBase();m_pPatternWeapon=weapon;
+	}
+	SpreadMath::Shot_t shot={m_iSeed,spread,bullets,fixed};
+	if(!fixed&&TICKS_TO_TIME(local->m_nTickBase())-weapon->m_flLastFireTime()>(bullets>1?.25f:1.25f))
+	{
+		shot.m_flFirstRange=SDK::AttribHookValue(0.f,"mult_spread_scale_first_shot",weapon);
+		shot.m_bFirstPerfect=shot.m_flFirstRange==0;
+	}
+	if(!std::isfinite(shot.m_flFirstRange)||shot.m_flFirstRange<0) return 0;
+	const int seeds=exact?1:16;
+	if(capacity<bullets*seeds) return 0;
+	for(int seed=0;seed<seeds;++seed)
+	{
+		// Uniform prior over seeds when server timing is unknown; never used as exact nospread.
+		if(!exact) shot.m_iSeed=seed*17;
+		SpreadMath::GetPellets(shot,output+seed*bullets,bullets);
+	}
+	if(exact&&Vars::Aimbot::General::NoSpread.Value&&ShouldRun(weapon))
+	{
+		const int chosen=SpreadMath::ChoosePellet(output,bullets,{},shot.m_bFirstPerfect);
+		correction=output[chosen];
+	}
+	return bullets*seeds;
+}
+
 void CNoSpreadHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
-	m_iPredictionBullet = -1;
-	if (!ShouldRun(pWeapon))
-		return;
-
-	m_iSeed = GetSeed(pCmd);
-#ifdef SEEDPRED_DEBUG
-	SDK::Output("CNoSpreadHitscan::Run", std::format("{}: {}", SDK::PlatFloatTime() + m_dTimeDelta, m_iSeed).c_str(), { 255, 0, 0 });
-#endif
-
-	const int iBullets = pWeapon->GetBulletsPerShot();
-	if (iBullets <= 0)
-		return;
-
-	const bool bFixed = IsFixedSpread(pWeapon);
-	if (!bFixed && !m_bSynced)
-		return;
-
-	SpreadMath::Shot_t tShot = { m_iSeed, pWeapon->GetWeaponSpread(), iBullets, bFixed };
-	if (!bFixed && TICKS_TO_TIME(pLocal->m_nTickBase()) - pWeapon->m_flLastFireTime() > (iBullets > 1 ? 0.25f : 1.25f))
-	{
-		tShot.m_flFirstRange = SDK::AttribHookValue(0.f, "mult_spread_scale_first_shot", pWeapon);
-		tShot.m_bFirstPerfect = !tShot.m_flFirstRange;
-	}
-
-	const Vec3 vPunch = pLocal->m_vecPunchAngle();
-	const Vec3 vShotAngles = pCmd->viewangles + vPunch;
-
-	auto vPellets = SpreadMath::GetPellets(tShot);
-	m_iPredictionBullet = SpreadMath::ChoosePellet(vPellets, vShotAngles, tShot.m_bFirstPerfect);
-
-	const auto& tPellet = vPellets[m_iPredictionBullet];
-	if (!tPellet.m_flRight && !tPellet.m_flUp)
-		return;
-
-	Vec3 vForward; Math::AngleVectors(vShotAngles, &vForward);
-	Vec3 vAngles = SpreadMath::SolveAngles(vForward, tPellet, vShotAngles.z, vShotAngles.x) - vPunch;
-	SDK::FixMovement(pCmd, vAngles);
-	pCmd->viewangles = vAngles;
-	Math::ClampAngles(pCmd->viewangles);
-
-	G::SilentAngles = true;
+	m_iPredictionBullet=-1;
+	if(!ShouldRun(pWeapon)) return;
+	std::array<SpreadMath::Pellet_t,512> pattern{};
+	SpreadMath::Pellet_t pellet;bool exact=false;
+	if(!BuildAimPattern(pLocal,pWeapon,pCmd,pattern.data(),int(pattern.size()),pellet,exact)||!exact) return;
+	const int bullets=pWeapon->GetBulletsPerShot();
+	const Vec3 punch=pLocal->m_vecPunchAngle(),shotAngles=pCmd->viewangles+punch;
+	const bool firstPerfect=pellet.m_flRight==0&&pellet.m_flUp==0;
+	m_iPredictionBullet=SpreadMath::ChoosePellet(pattern.data(),bullets,{},firstPerfect);
+	if(!pellet.m_flRight&&!pellet.m_flUp) return;
+	Vec3 forward;Math::AngleVectors(shotAngles,&forward);
+	Vec3 angles=SpreadMath::SolveAngles(forward,pellet,shotAngles.z,shotAngles.x)-punch;
+	SDK::FixMovement(pCmd,angles);pCmd->viewangles=angles;Math::ClampAngles(pCmd->viewangles);
+	G::SilentAngles=true;
 }
 
 void CNoSpreadHitscan::CacheDrawInfo(CTFPlayer* pLocal)

@@ -4,17 +4,24 @@
 #include "../../Aimbot/AimbotProjectile/ProjProfiler.h"
 #include <numeric>
 
-void CMovementSimulation::Store(MoveStorage& tMoveStorage)
+bool CMovementSimulation::Store(MoveStorage& tMoveStorage)
 {
 	auto pMap = tMoveStorage.m_pPlayer->GetPredDescMap();
-	if (!pMap)
-		return;
+	if (!pMap) return false;
+	const size_t iSize=tMoveStorage.m_pPlayer->GetIntermediateDataSize();
+	if(!iSize) return false;
+	if(tMoveStorage.m_pExternalData)
+	{
+		if(iSize>tMoveStorage.m_nExternalBytes) return false;
+		tMoveStorage.m_pData=tMoveStorage.m_pExternalData;
+	}
+	else tMoveStorage.m_pData=reinterpret_cast<byte*>(I::MemAlloc->Alloc(iSize));
+	if(!tMoveStorage.m_pData) return false;
 
-	size_t iSize = tMoveStorage.m_pPlayer->GetIntermediateDataSize();
-	tMoveStorage.m_pData = reinterpret_cast<byte*>(I::MemAlloc->Alloc(iSize));
-
+	// Match upstream: do not serialize transient non-networked engine caches.
 	CPredictionCopy copy = { PC_NETWORKED_ONLY, tMoveStorage.m_pData, PC_DATA_PACKED, tMoveStorage.m_pPlayer, PC_DATA_NORMAL };
 	copy.TransferData("MovementSimulationStore", tMoveStorage.m_pPlayer->entindex(), pMap);
+	return true;
 }
 
 void CMovementSimulation::Reset(MoveStorage& tMoveStorage)
@@ -24,7 +31,7 @@ void CMovementSimulation::Reset(MoveStorage& tMoveStorage)
 		auto pMap = tMoveStorage.m_pPlayer->GetPredDescMap();
 		if (!pMap)
 		{
-			I::MemAlloc->Free(tMoveStorage.m_pData);
+			if(tMoveStorage.m_pData!=tMoveStorage.m_pExternalData) I::MemAlloc->Free(tMoveStorage.m_pData);
 			tMoveStorage.m_pData = nullptr;
 			return;
 		}
@@ -32,7 +39,7 @@ void CMovementSimulation::Reset(MoveStorage& tMoveStorage)
 		CPredictionCopy copy = { PC_NETWORKED_ONLY, tMoveStorage.m_pPlayer, PC_DATA_NORMAL, tMoveStorage.m_pData, PC_DATA_PACKED };
 		copy.TransferData("MovementSimulationReset", tMoveStorage.m_pPlayer->entindex(), pMap);
 
-		I::MemAlloc->Free(tMoveStorage.m_pData);
+		if(tMoveStorage.m_pData!=tMoveStorage.m_pExternalData) I::MemAlloc->Free(tMoveStorage.m_pData);
 		tMoveStorage.m_pData = nullptr;
 	}
 }
@@ -214,7 +221,11 @@ bool CMovementSimulation::Initialize(CBaseEntity* pEntity, MoveStorage& tMoveSto
 	m_flOldFrametime = I::GlobalVars->frametime;
 
 	// store restore data
-	Store(tMoveStorage);
+	if(!Store(tMoveStorage))
+	{
+		tMoveStorage.m_bInitFailed=tMoveStorage.m_bFailed=true;
+		return false;
+	}
 
 	// the hacks that make it work
 	I::MoveHelper->SetHost(pPlayer);
@@ -261,7 +272,8 @@ bool CMovementSimulation::Initialize(CBaseEntity* pEntity, MoveStorage& tMoveSto
 		return false;
 	}
 
-	tMoveStorage.m_vPath = { tMoveStorage.m_MoveData.m_vecAbsOrigin };
+	if(tMoveStorage.m_bStorePath) tMoveStorage.m_vPath = { tMoveStorage.m_MoveData.m_vecAbsOrigin };
+	else tMoveStorage.m_vPath.clear();
 	if (bPredict)
 	{
 		for (int i = 0; i < H::Entities.GetChoke(pPlayer->entindex()); i++)
@@ -295,10 +307,10 @@ void CMovementSimulation::SetupMoveData(MoveStorage& tMoveStorage)
 				tMoveStorage.m_MoveData.m_vecViewAngles = H::Entities.GetEyeAngles(iIndex);
 		}
 
-		const auto& vRecords = m_mRecords[iIndex];
-		if (!vRecords.empty())
+		const auto records=m_mRecords.find(iIndex);
+		if(records!=m_mRecords.end()&&!records->second.empty())
 		{
-			auto& tRecord = vRecords.front();
+			const auto& tRecord=records->second.front();
 			if (!tRecord.m_vDirection.IsZero())
 			{
 				G::DummyCmd.forwardmove = tRecord.m_vDirection.x;
@@ -380,7 +392,7 @@ static inline void VisualizeRecords(MoveData& tRecord1, MoveData& tRecord2, Colo
 }
 #endif
 
-static inline bool GetYawDifference(MoveData& tRecord1, MoveData& tRecord2, bool bStart, float* pYaw, float flStraightFuzzyValue, MoveYawState& tState, int iMaxChanges = 0, int iMaxChangeTime = 0, float flMaxSpeed = 0.f)
+static inline bool GetYawDifference(const MoveData& tRecord1, const MoveData& tRecord2, bool bStart, float* pYaw, float flStraightFuzzyValue, MoveYawState& tState, int iMaxChanges = 0, int iMaxChangeTime = 0, float flMaxSpeed = 0.f)
 {
 	const float flYaw1 = Math::VectorAngles(tRecord1.m_vDirection).y, flYaw2 = Math::VectorAngles(tRecord2.m_vDirection).y;
 	const float flTime1 = tRecord1.m_flSimTime, flTime2 = tRecord2.m_flSimTime;
@@ -421,9 +433,9 @@ void CMovementSimulation::GetAverageYaw(MoveStorage& tMoveStorage, int iSamples)
 {
 	auto pPlayer = tMoveStorage.m_pPlayer;
 	bool bLocal = pPlayer->entindex() == I::EngineClient->GetLocalPlayer();
-	auto& vRecords = m_mRecords[pPlayer->entindex()];
-	if (vRecords.empty())
-		return;
+	auto records=m_mRecords.find(pPlayer->entindex());
+	if(records==m_mRecords.end()||records->second.empty()) return;
+	const auto& vRecords=records->second;
 
 	bool bGround = tMoveStorage.m_bDirectMove; int iMinimumStrafes = 4;
 	float flMaxSpeed = SDK::MaxSpeed(tMoveStorage.m_pPlayer, false, true);
@@ -501,7 +513,7 @@ void CMovementSimulation::GetAverageYaw(MoveStorage& tMoveStorage, int iSamples)
 		return;
 
 	tMoveStorage.m_flAverageYaw = flAverageYaw;
-	SDK::Output("MovementSimulation", std::format("flAverageYaw calculated to {} from {} ({}){}", flAverageYaw, iTicks, iMinimum, bLocal ? " (local)" : "").c_str(), { 100, 255, 150 }, Vars::Debug::Logging.Value);
+	if(Vars::Debug::Logging.Value) SDK::Output("MovementSimulation", std::format("flAverageYaw calculated to {} from {} ({}){}", flAverageYaw, iTicks, iMinimum, bLocal ? " (local)" : "").c_str(), { 100, 255, 150 }, Vars::Debug::Logging.Value);
 }
 
 bool CMovementSimulation::StrafePrediction(MoveStorage& tMoveStorage, bool bStrafe, bool bHitchance)
@@ -519,16 +531,17 @@ bool CMovementSimulation::StrafePrediction(MoveStorage& tMoveStorage, bool bStra
 		// really hope this doesn't work like shit
 		if (bHitchance && !tMoveStorage.m_pPlayer->m_vecVelocity().IsZero() && Vars::Aimbot::Projectile::HitChance.Value)
 		{
-			const auto& vRecords = m_mRecords[tMoveStorage.m_pPlayer->entindex()];
-			const auto iSamples = vRecords.size();
+			const auto found=m_mRecords.find(tMoveStorage.m_pPlayer->entindex());
+			const auto* records=found==m_mRecords.end()?nullptr:&found->second;
+			const auto iSamples=records?records->size():0;
 
 			float flCurrentChance = 1.f, flAverageYaw = 0.f;
 			for (size_t i = 0; i < iSamples; i++)
 			{
-				if (vRecords.size() <= i + 2)
+				if (iSamples <= i + 2)
 					break;
 
-				const auto& pRecord1 = vRecords[i], & pRecord2 = vRecords[i + 1];
+				const auto& pRecord1 = (*records)[i], & pRecord2 = (*records)[i + 1];
 				const float flYaw1 = Math::VectorAngles(pRecord1.m_vDirection).y, flYaw2 = Math::VectorAngles(pRecord2.m_vDirection).y;
 				const float flTime1 = pRecord1.m_flSimTime, flTime2 = pRecord2.m_flSimTime;
 				const int iTicks = std::max(TIME_TO_TICKS(flTime1 - flTime2), 1);
@@ -549,7 +562,7 @@ bool CMovementSimulation::StrafePrediction(MoveStorage& tMoveStorage, bool bStra
 
 			if (flCurrentChance < Vars::Aimbot::Projectile::HitChance.Value / 100)
 			{
-				SDK::Output("MovementSimulation", std::format("Hitchance ({}% < {}%)", flCurrentChance * 100, Vars::Aimbot::Projectile::HitChance.Value).c_str(), { 80, 200, 120 }, Vars::Debug::Logging.Value);
+				if (Vars::Debug::Logging.Value) SDK::Output("MovementSimulation", std::format("Hitchance ({}% < {}%)", flCurrentChance * 100, Vars::Aimbot::Projectile::HitChance.Value).c_str(), { 80, 200, 120 }, Vars::Debug::Logging.Value);
 				return false;
 			}
 		}
@@ -561,10 +574,10 @@ bool CMovementSimulation::StrafePrediction(MoveStorage& tMoveStorage, bool bStra
 			tMoveStorage.m_MoveData.m_flForwardMove = tMoveStorage.m_MoveData.m_flSideMove = 0.f;
 		else
 		{
-			const auto& vRecords = m_mRecords[tMoveStorage.m_pPlayer->entindex()];
-			if (!vRecords.empty())
+			const auto found=m_mRecords.find(tMoveStorage.m_pPlayer->entindex());
+			if (found!=m_mRecords.end()&&!found->second.empty())
 			{
-				auto& tRecord = vRecords.front();
+				const auto& tRecord=found->second.front();
 				Vec3 vDirection = tRecord.m_vVelocity;
 				if (!vDirection.IsZero() && tRecord.m_bInputDirection)
 				{	// fix inputs for turning
@@ -737,7 +750,7 @@ void CMovementSimulation::RunTick(MoveStorage& tMoveStorage, bool bPath, RunTick
 
 	RestoreBounds(tMoveStorage.m_pPlayer);
 
-	if (bPath)
+	if (bPath&&tMoveStorage.m_bStorePath)
 		tMoveStorage.m_vPath.push_back(tMoveStorage.m_MoveData.m_vecAbsOrigin);
 }
 
@@ -765,7 +778,9 @@ void CMovementSimulation::Restore(MoveStorage& tMoveStorage)
 
 float CMovementSimulation::GetPredictedDelta(CBaseEntity* pEntity)
 {
-	auto& vSimTimes = m_mSimTimes[pEntity->entindex()];
+	const auto times=m_mSimTimes.find(pEntity->entindex());
+	if(times==m_mSimTimes.end()) return TICK_INTERVAL;
+	const auto& vSimTimes=times->second;
 	if (!vSimTimes.empty())
 	{
 		switch (Vars::Aimbot::Projectile::DeltaMode.Value)

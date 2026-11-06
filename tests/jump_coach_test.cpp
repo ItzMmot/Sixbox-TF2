@@ -45,6 +45,18 @@ static Plan plan;
 static Body BodyAt(Vector origin,Vector velocity) {return {origin,velocity,{-24,-24,0},{24,24,82}};}
 int main()
 {
+    // Directional auto-strafe must be evaluated repeatedly from held intent.
+    // Mirrored one-tick phases converge to nearly the same landing, rather than
+    // holding opposite sidemoves for the entire prediction horizon.
+    {
+        Physics physics;World floor;Plan a,b;
+        const AirControl control{true,.5f,180};
+        Predict(BodyAt({0,0,120},{400,1,-40}),{1,0,0},physics.wishSpeed,physics,240,2048,Cast,&floor,false,1,a,control);
+        Predict(BodyAt({0,0,120},{400,-1,-40}),{1,0,0},physics.wishSpeed,physics,240,2048,Cast,&floor,false,1,b,control);
+        assert(a.end==End::Landed&&b.end==End::Landed);
+        assert(std::abs(a.landing.y-b.landing.y)<8.f);
+        assert(Aligned(DirectionalWish({400,0,0},{0,1,0},{false,.5f,180}),{0,1,0}));
+    }
     Physics p;World world;
     const auto before=allocations;
     Predict(BodyAt({0,0,120},{400,0,-40}),{},0,p,240,2048,Cast,&world,false,1,plan);
