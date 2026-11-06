@@ -53,6 +53,7 @@
     <ClCompile Include="src\Features\Aimbot\AutoTrolldier\AutoTrolldier.cpp" />
     <ClCompile Include="src\Features\ImGui\TextEffects\TextEffects.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoHeal\AutoHeal.cpp" />
+    <ClCompile Include="src\Features\Aimbot\AutoSapper\AutoSapper.cpp" />
     <ClCompile Include="src\Features\Misc\AutoQueue\AutoQueue.cpp" />
     <ClCompile Include="src\Features\Misc\AutoQueue\MvmQueue.cpp" />
     <ClCompile Include="src\Features\Misc\ProfileStalker\ProfileStalker.cpp" Condition="Exists('src\Features\Misc\ProfileStalker\ProfileStalker.cpp')" />
@@ -480,6 +481,7 @@
     <ClInclude Include="src\Features\ImGui\TextEffects\TextEffects.h" />
     <ClInclude Include="src\Features\ImGui\TextEffects\GlyphMask.h" />
     <ClInclude Include="src\Features\Aimbot\AutoHeal\AutoHeal.h" />
+    <ClInclude Include="src\Features\Aimbot\AutoSapper\AutoSapper.h" />
     <ClInclude Include="src\Features\Misc\AutoQueue\AutoQueue.h" />
     <ClInclude Include="src\Features\Misc\AutoQueue\MvmQueue.h" />
     <ClInclude Include="src\Features\Misc\ProfileStalker\ProfileStalker.h" Condition="Exists('src\Features\Misc\ProfileStalker\ProfileStalker.h')" />

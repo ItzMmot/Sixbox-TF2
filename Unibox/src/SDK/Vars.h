@@ -490,6 +490,14 @@ NAMESPACE_BEGIN(Vars)
 			CVar(AutoUpgradeTeleporterLVL, "Teleporter LVL", 2, SLIDER_CLAMP, 1, 3);
 		NAMESPACE_END(AutoEngie)
 
+		NAMESPACE_BEGIN(AutoSapper, Auto Sapper)
+			CVar(AutoEquip, "Auto equip", false);
+			CVar(SwitchBack, "Switch back", true);
+			CVar(CheckEnemyView, "Check enemy view", true);
+			CVar(EnemyViewFOV, "Enemy view FOV", 90.f, SLIDER_CLAMP | SLIDER_PRECISION, 10.f, 180.f, 5.f);
+			CVar(IgnoreEngineer, "Ignore engineer", true);
+		NAMESPACE_END(AutoSapper)
+
 		NAMESPACE_BEGIN(Zombie)
 			CVarEnum(Abilities, VA_LIST("Abilities", "Zombie abilities"), 0b1111, DROPDOWN_MULTI, "Off",
 				VA_LIST("Sniper spit", "Spy EMP", "Pyro spew", "Heavy rock"),

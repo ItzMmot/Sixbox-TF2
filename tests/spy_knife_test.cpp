@@ -28,6 +28,54 @@ int main()
             assert(SafeGeometry(separation,owner,victim,0));
         }
     }
+    constexpr float dt=1.f/66.f;
+    assert(ArrivalWindow(0,dt)==3);
+    assert(ArrivalWindow(3.f*dt,dt)==6);
+    assert(ArrivalWindow(1,dt)==0); // Do not silently truncate an unmodelled wait.
+    assert(ArrivalWindow(-1,dt)==0);
+    assert(ArrivalWindow(0,0)==0);
+    assert(ArrivalWindow(std::numeric_limits<float>::quiet_NaN(),dt)==0);
+    assert(std::abs(RearRadius({24,24,0},{24,24,0},{1,0,0})-52.f)<.001f);
+    assert(ArrivalReserve(1)>ArrivalReserve(0));
+    int checked=0;
+    assert(!ArrivalContactWindow(3,[&](int tick){++checked;return tick!=1;}));
+    assert(checked==2); // A valid endpoint cannot hide a blocked middle sample.
+    assert(!ArrivalContactWindow(13,[](int){return true;}));
+    // A ray/hull contact at the old first reachable pixel is lost while an
+    // escaping victim advances. Reserve + arrival samples require a deeper end.
+    for(float speed:{133.f,300.f,400.f}) for(float angle:{0.f,45.f,90.f,180.f})
+    {
+        const V forward=Rotate({1,0,0},angle);
+        const V velocity=Mul(forward,speed);
+        const float range=48.f-(2.f+4.f*.9f),hull=18.f-(1.f+2.f*.9f);
+        auto contact=[&](V owner,int tick,float reserve) {
+            // Axis aligned in target-local coordinates, native ray before hull.
+            const float gap=-Dot(owner,forward)+speed*dt*tick;
+            const V start{-gap,0,36},end{range-reserve,0,0};
+            float hit=AimPolicy::RayBox(start,end,{-24,-24,0},{24,24,82},1.f);
+            if(hit<0) hit=AimPolicy::RayBox(start,end,{-24-hull,-24-hull,-hull},{24+hull,24+hull,82+hull},1.f);
+            return hit>=0;
+        };
+        V legacy{},robust{};bool oldFound=false,newFound=false;
+        for(int tick=1;tick<=MaxTicks;++tick)
+        {
+            const V owner=Mul(forward,-150.f+320.f*dt*tick);
+            if(!oldFound&&contact(owner,0,0)) {legacy=owner;oldFound=true;}
+            if(!newFound&&ArrivalContactWindow(3,[&](int sample){return contact(owner,sample,ArrivalReserve(.9f));}))
+                {robust=owner;newFound=true;}
+        }
+        assert(oldFound&&!contact(legacy,3,0));
+        assert(newFound&&contact(robust,3,ArrivalReserve(.9f)));
+        assert(Dot(Sub(robust,legacy),forward)>8.f);
+        // At the desired rear offset the follower retains forward momentum.
+        const V follow=ChaseWish(Mul(forward,-52.f),{},forward,velocity,52.f);
+        assert(Dot(follow,forward)>0&&Length(follow)<=450.001f);
+        const V advanced=Add(Mul(forward,-52.f),Mul(follow,dt));
+        const V advancedTarget=Mul(velocity,dt);
+        assert(std::abs(Length(Sub(advancedTarget,advanced))-52.f)<.001f);
+    }
+    assert(Length(ChaseWish({-52,0,0},{},{1,0,0},{},52))==0);
+    assert(Length(ChaseWish({-10000,0,0},{},{1,0,0},{400,0,0},52))<=450.001f);
     assert(CalibratedDrift(4,5,1));
     assert(!CalibratedDrift(4.1f,5,1));
     assert(!CalibratedDrift(4,5.1f,1));

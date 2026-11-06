@@ -48,7 +48,7 @@ class CSpyKnife
     bool Eligible(CTFPlayer* local,CTFWeaponBase* weapon) const;
     bool ValidTarget(CTFPlayer* local,CTFWeaponBase* weapon,CTFPlayer* target) const;
     bool Contact(CTFPlayer* local,CTFWeaponBase* weapon,CTFPlayer* target,const Vec3& origin,
-        const Vec3& currentAngles,Vec3& angles,Vec3& point,bool planning=false,const Vec3* predictedOwner=nullptr,bool fixedAngles=false,float yawOffset=0);
+        const Vec3& currentAngles,Vec3& angles,Vec3& point,bool planning=false,const Vec3* predictedOwner=nullptr,bool fixedAngles=false,float yawOffset=0,float reachReserve=0);
     bool PlanWarp(CTFPlayer* local,CTFWeaponBase* weapon,CTFPlayer* target,CUserCmd* command);
 public:
     void Reset(bool clearTransport=false);

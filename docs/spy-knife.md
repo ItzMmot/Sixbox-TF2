@@ -19,8 +19,8 @@ The normal native geometry is documented in Valve's
 [knife implementation](https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/game/shared/tf/tf_weapon_knife.cpp).
 
 A successful warp approach sends movement only. The attack waits for a subsequent
-command and acknowledgement of the completed movement packet. The owner brakes
-while waiting, then validates the current target again. An aborted or manual warp
+command and acknowledgement of the completed movement packet. The owner follows the target while waiting, then validates the current target
+again. An aborted or manual warp
 also establishes an acknowledgement barrier, preventing a fallback slash in the
 same packet. Timeout or failed contact cancels the attempt.
 
@@ -53,8 +53,8 @@ promise that an opponent will react to a feint.
 
 Search storage is fixed; native probes restore player prediction, clock, current
 command and movement pointers. The global MoveSim snapshot policy remains the
-upstream networked-only policy. Warp checks at most 42 movement steps with a soft
-2 ms budget; trickstab target/route probes share a 96-step limit and soft 3 ms
+upstream networked-only policy. Warp checks at most 12 target forecast steps and 42 local movement steps with a soft
+3 ms budget; trickstab target/route probes share a 96-step limit and soft 3 ms
 budget per rendered frame. Atomic native calls can finish past a deadline.
 
 ## Backstab visualization
@@ -98,3 +98,28 @@ Installed artifact (2026-11-06): `7cf780d51d0e35f81e248978a1b28aeefc9cd83dee2a1e
 (6434816 bytes, 274 compiled client units). Output and Proton hashes match;
 previous `f30318cf…` DLL and both old/tuned profile copies are verified.
 The new gameplay behavior has not yet been measured in a live game.
+
+
+## Moving-target warp arrival
+
+Warp no longer stops at the first grazing knife contact. It targets a rear offset
+based on rectangular collision hulls instead of their larger circumscribed circles.
+The endpoint must pass inset native contact tests at the current target pose,
+the middle of the acknowledgement forecast, and its end. The additional reach
+reserve is 8–12 HU according to Backstab safety. The forecast includes real RTT
+and three ordinary ticks, never one target tick per shifted owner command.
+Native MoveSim supplies the forecast, including collision and ground checks.
+Unsupported windows beyond 12 ticks or insufficient remaining charge reject the
+warp rather than spending ticks on an unverified endpoint.
+
+While waiting for acknowledgement, movement follows the current rear offset with
+victim-velocity feed-forward and bounded position correction instead of braking
+to a stop. The acknowledgement barrier, conservative current-contact validation
+and final outgoing attack validation remain in force. The arrival test deliberately
+does not rely on the follower advancing, so some high-latency or fast escaping
+approaches are rejected even when a less conservative approach might work.
+
+Regression tests reproduce first-contact failure against escaping targets at
+133/300/400 HU/s in four directions, verify a deeper accepted endpoint, reject an
+invalid middle sample, and check stationary/moving follower commands and bounds.
+These analytic checks do not establish a live-game miss rate.

@@ -17,7 +17,6 @@ private:
 
 	std::vector<int> GetTimeMods();
 
-	bool FindNearestBuildPoint(CBaseObject* pBuilding, CTFPlayer* pLocal, Vec3& vPoint);
 	bool RunSapper(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd);
 
 	Vec3 m_vEyePos = {},m_vNextEyePos={};
@@ -39,6 +38,7 @@ private:
 	std::pair<float, float> GetClosestRecord(std::vector<TickRecord*> vRecords);
 
 public:
+	bool FindNearestBuildPoint(CBaseObject* pBuilding, CTFPlayer* pLocal, Vec3& vPoint);
 	void Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd);
 
 	void BacktrackToCrosshair(CTFPlayer* pLocal, CUserCmd* pCmd);

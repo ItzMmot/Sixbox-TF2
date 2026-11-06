@@ -110,13 +110,13 @@ int CAutoTrolldier::AutomaticAimType() const
 	const auto& binds = F::Binds.m_vBinds;
 	for (int i = 0; i < int(binds.size()); ++i)
 	{
-		if (!binds[i].m_bEnabled || binds[i].m_iType != BindEnum::Key) continue;
+		if (!binds[i].m_bEnabled || binds[i].m_iType != BindEnum::Key || !binds[i].m_bFiltersMet) continue;
 		bool allowed = true;
 		int parent = binds[i].m_iParent, depth = 0;
 		while (parent != DEFAULT_BIND)
 		{
 			if (parent < 0 || parent >= int(binds.size()) || ++depth > int(binds.size())
-				|| !binds[parent].m_bEnabled || (binds[parent].m_iType != BindEnum::Key && !binds[parent].m_bActive))
+				|| !binds[parent].m_bEnabled || (binds[parent].m_iType != BindEnum::Key ? !binds[parent].m_bActive : !binds[parent].m_bFiltersMet))
 			{ allowed = false; break; }
 			parent = binds[parent].m_iParent;
 		}

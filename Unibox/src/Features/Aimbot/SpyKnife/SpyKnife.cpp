@@ -116,14 +116,14 @@ bool CSpyKnife::Reliable(CTFPlayer* target)
     return o&&!o->unpredictable&&GetTickCount64()-o->seen<=350&&std::isfinite(o->yaw);
 }
 bool CSpyKnife::Contact(CTFPlayer* local,CTFWeaponBase* weapon,CTFPlayer* target,const Vec3& origin,
-    const Vec3& currentAngles,Vec3& angles,Vec3& point,bool planning,const Vec3* predictedOwner,bool fixedAngles,float yawOffset)
+    const Vec3& currentAngles,Vec3& angles,Vec3& point,bool planning,const Vec3* predictedOwner,bool fixedAngles,float yawOffset,float reachReserve)
 {
     auto reject=[&](Status reason) {if(!planning) m_status=reason;return false;};
     if(!Reliable(target)) return reject(Status::Uncertain);
     const float safety=SpyKnife::Safety(Vars::Aimbot::Melee::BackstabSafety.Value);
     const float scale=(std::max)(1.f,local->m_flModelScale());
     // Inset the actual contact, rather than trusting a grazing full-size hull.
-    const float range=SDK::AttribHookValue(weapon->GetSwingRange(),"melee_range_multiplier",weapon)*scale-(2.f+4.f*safety);
+    const float range=SDK::AttribHookValue(weapon->GetSwingRange(),"melee_range_multiplier",weapon)*scale-(2.f+4.f*safety)-std::clamp(reachReserve,0.f,24.f);
     const float hull=(std::max)(0.f,SDK::AttribHookValue(18.f,"melee_bounds_multiplier",weapon)*scale-(1.f+2.f*safety));
     if(!Finite(origin)||!std::isfinite(range)||!std::isfinite(hull)||range<=0) return reject(Status::Range);
     const Vec3 eye=local->GetShootPos()+(predictedOwner?*predictedOwner-local->m_vecOrigin():Vec3{});
@@ -182,9 +182,32 @@ bool CSpyKnife::PlanWarp(CTFPlayer* local,CTFWeaponBase* weapon,CTFPlayer* targe
     if(!Finite(targetOrigin)||localOrigin.DistToSqr(targetOrigin)>distance*distance) return false;
     m_searchFrame=I::GlobalVars->framecount;
     Vec3 victimForward;Math::AngleVectors(target->GetEyeAngles(),&victimForward);victimForward.Normalize2D();
-    const float radius=local->m_vecMaxs().To2D().Length()+target->m_vecMaxs().To2D().Length()+3.f;
+    const float radius=SpyKnife::RearRadius(Point(local->m_vecMaxs()),Point(target->m_vecMaxs()),Point(victimForward));
+    const float safety=SpyKnife::Safety(Vars::Aimbot::Melee::BackstabSafety.Value);
+    const float reserve=SpyKnife::ArrivalReserve(safety);
+    const int arrival=SpyKnife::ArrivalWindow(F::Backtrack.GetReal(),TICK_INTERVAL);
+    if(!arrival) return false;
     LARGE_INTEGER now,frequency;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&frequency);
-    const auto deadline=now.QuadPart+(std::max)(frequency.QuadPart/500,int64_t(1));
+    const auto deadline=now.QuadPart+(std::max)(frequency.QuadPart*3/1000,int64_t(1));
+    // Forecast the acknowledgement window once, independently of warp length.
+    // Probe before the local scope; never nest MoveSim's shared movement state.
+    {
+        MovementScope forecast(target,m_saved.data(),m_saved.size(),m_moveScratch.data(),m_moveScratch.size(),true,&targetOrigin);
+        if(!forecast.initialized) return false;
+        m_forecast[0]=targetOrigin;
+        for(int tick=1;tick<=arrival;++tick)
+        {
+            QueryPerformanceCounter(&now);if(now.QuadPart>=deadline) return false;
+            F::MoveSim.RunTick(forecast.storage,false);
+            if(forecast.storage.m_bFailed||!target->IsOnGround()) return false;
+            m_forecast[tick]=forecast.storage.m_MoveData.m_vecAbsOrigin;
+            if(!Finite(m_forecast[tick])) return false;
+        }
+    }
+    const float yawRate=Observe(target)->rate;
+    Vec3 arrivalForward;
+    const float arrivalYaw=std::clamp(yawRate*TICKS_TO_TIME(arrival),-45.f,45.f);
+    Math::AngleVectors(target->GetEyeAngles()+Vec3(0,arrivalYaw,0),&arrivalForward);
     for(int attempt=0;attempt<2;++attempt)
     {
         QueryPerformanceCounter(&now);if(now.QuadPart>=deadline) break;
@@ -198,7 +221,7 @@ bool CSpyKnife::PlanWarp(CTFPlayer* local,CTFWeaponBase* weapon,CTFPlayer* targe
             for(int tick=1;tick<=ticks;++tick)
             {
                 QueryPerformanceCounter(&now);if(now.QuadPart>=deadline) break;
-                const Vec3 wish=Native(SpyKnife::RouteWish(Point(probe.storage.m_MoveData.m_vecAbsOrigin),Point(targetOrigin),Point(victimForward),radius,route));
+                const Vec3 wish=Native(SpyKnife::RouteWish(Point(probe.storage.m_MoveData.m_vecAbsOrigin),Point(m_forecast[arrival]),Point(arrivalForward),radius,route));
                 auto& move=probe.storage.m_MoveData;
                 move.m_vecViewAngles=command->viewangles;move.m_vecViewAngles.x=move.m_vecViewAngles.z=0;
                 const float yaw=Math::Deg2Rad(move.m_vecViewAngles.y);
@@ -208,7 +231,15 @@ bool CSpyKnife::PlanWarp(CTFPlayer* local,CTFWeaponBase* weapon,CTFPlayer* targe
                 if(probe.storage.m_bFailed||!local->IsOnGround()) break;
                 m_moves[tick]=wish;m_positions[tick]=move.m_vecAbsOrigin;
                 Vec3 angles,point;
-                if(Contact(local,weapon,target,targetOrigin,command->viewangles,angles,point,true,&move.m_vecAbsOrigin)) {found=tick;break;}
+                // First contact is insufficient: require inset reach through the
+                // sampled acknowledgement window even if the owner cannot advance.
+                const bool safe=SpyKnife::ArrivalContactWindow(arrival,[&](int sample) {
+                    QueryPerformanceCounter(&now);if(now.QuadPart>=deadline) return false;
+                    const float yawOffset=std::clamp(yawRate*TICKS_TO_TIME(sample),-45.f,45.f);
+                    return Contact(local,weapon,target,m_forecast[sample],command->viewangles,angles,point,true,
+                        &move.m_vecAbsOrigin,false,yawOffset,reserve);
+                });
+                if(safe) {found=tick;break;}
             }
         }
         if(found&&Reliable(target)&&F::Ticks.BeginKnifeWarp(found))
@@ -245,8 +276,13 @@ void CSpyKnife::Prepare(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* command
     {
         if(!Vars::Aimbot::Melee::WarpBehind.Value||command->command_number>m_expiry||GetTickCount64()>m_settleDeadline)
             {Reset();return;}
-        const Vec3 velocity=local->m_vecVelocity().To2D();
-        m_worldMove=velocity.Length2D()>5.f?-velocity.Normalized2D()*450.f:Vec3{};
+        // Keep pace with the victim while the movement packet is acknowledged.
+        // Braking here used to discard the reach gained by the shifted commands.
+        Vec3 forward;Math::AngleVectors(target->GetEyeAngles(),&forward);
+        const Vec3 origin=TargetOrigin(target),velocity=target->m_vecVelocity();
+        if(!Finite(origin)||!Finite(velocity)||!target->IsOnGround()) {Reset();return;}
+        const float radius=SpyKnife::RearRadius(Point(local->m_vecMaxs()),Point(target->m_vecMaxs()),Point(forward));
+        m_worldMove=Native(SpyKnife::ChaseWish(Point(local->m_vecOrigin()),Point(origin),Point(forward),Point(velocity),radius));
         m_prepared=command->command_number;ApplyMovement(local,weapon,command);return;
     }
     if(m_trick)

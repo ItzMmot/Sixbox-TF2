@@ -468,6 +468,7 @@
     <ClCompile Include="src\Features\Aimbot\AutoTrolldier\AutoTrolldier.cpp" />
     <ClCompile Include="src\Features\ImGui\TextEffects\TextEffects.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoHeal\AutoHeal.cpp" />
+    <ClCompile Include="src\Features\Aimbot\AutoSapper\AutoSapper.cpp" />
     <ClCompile Include="src\Features\AntiCheatCompatibility\AntiCheatCompatibility.cpp" />
     <ClCompile Include="src\Features\AutoJoin\AutoJoin.cpp" />
     <ClCompile Include="src\Features\Createmove\Createmove.cpp" />
@@ -759,6 +760,7 @@
     <ClInclude Include="src\Features\ImGui\TextEffects\TextEffects.h" />
     <ClInclude Include="src\Features\ImGui\TextEffects\GlyphMask.h" />
     <ClInclude Include="src\Features\Aimbot\AutoHeal\AutoHeal.h" />
+    <ClInclude Include="src\Features\Aimbot\AutoSapper\AutoSapper.h" />
     <ClInclude Include="src\Features\AntiCheatCompatibility\AntiCheatCompatibility.h" />
     <ClInclude Include="src\Features\AutoJoin\AutoJoin.h" />
     <ClInclude Include="src\Features\Createmove\Createmove.h" />

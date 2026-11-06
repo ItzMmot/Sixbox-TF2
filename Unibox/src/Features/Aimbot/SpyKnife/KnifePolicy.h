@@ -70,6 +70,38 @@ namespace SpyKnife
         }
         return true;
     }
+    constexpr int ArrivalTicks=12;
+    // Real elapsed time until movement acknowledgement + a fresh attack command.
+    // Shifted commands do not advance the victim once per charged tick.
+    inline int ArrivalWindow(float latency,float interval)
+    {
+        if(!std::isfinite(latency)||latency<0||!std::isfinite(interval)||interval<=0) return 0;
+        const float ticks=std::ceil(latency/interval)+3.f;
+        return ticks<=ArrivalTicks?int(ticks):0;
+    }
+    template<class Check> bool ArrivalContactWindow(int ticks,Check&& check)
+    {
+        if(ticks<3||ticks>ArrivalTicks) return false;
+        for(int sample:{0,ticks/2,ticks}) if(!check(sample)) return false;
+        return true;
+    }
+    inline float ArrivalReserve(float safety) {return 8.f+4.f*Safety(safety);}
+    inline float RearRadius(V ownerHalf,V targetHalf,V forward)
+    {
+        forward=Unit(forward);
+        // Rectangular hull support along facing, rather than circumscribed circles.
+        return std::abs(forward.x)*(ownerHalf.x+targetHalf.x)
+            +std::abs(forward.y)*(ownerHalf.y+targetHalf.y)+4.f;
+    }
+    inline V ChaseWish(V owner,V target,V forward,V velocity,float radius)
+    {
+        if(!std::isfinite(velocity.x)||!std::isfinite(velocity.y)||!std::isfinite(radius)||radius<=0) return {};
+        const V goal=Sub(target,Mul(Unit(forward),radius));
+        V wish=Add(V{velocity.x,velocity.y,0},Mul(Sub(goal,owner),8.f));
+        const float speed=Length(wish);
+        if(!std::isfinite(speed)) return {};
+        return speed>450.f?Mul(wish,450.f/speed):wish;
+    }
     inline bool CalibratedDrift(float position,float yaw,float safety)
     {
         safety=Safety(safety);
