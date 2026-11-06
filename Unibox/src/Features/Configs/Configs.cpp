@@ -799,6 +799,11 @@ bool CConfigs::SaveConfig(const std::string& sConfigName, bool bNotify)
 				SaveJson(tChild, "Not", tBind.m_bNot);
 				SaveJson(tChild, "Active", tBind.m_bActive);
 				SaveJson(tChild, "Parent", tBind.m_iParent);
+				SaveJson(tChild, "Toggled", tBind.m_bToggled);
+				SaveJson(tChild, "ClassMask", tBind.m_iClassMask);
+				SaveJson(tChild, "Surface", tBind.m_iSurface);
+				SaveJson(tChild, "Items", tBind.m_vItems);
+				SaveJson(tChild, "Collapsed", tBind.m_bCollapsed);
 
 				tSub.put_child(std::to_string(iID), tChild);
 			}
@@ -931,6 +936,12 @@ bool CConfigs::LoadConfig(const std::string& sConfigName, bool bNotify)
 				LoadJson(tChild, "Not", tBind.m_bNot);
 				LoadJson(tChild, "Active", tBind.m_bActive);
 				LoadJson(tChild, "Parent", tBind.m_iParent);
+				tBind.m_bToggled = tBind.m_bActive; // older configs stored toggle state in "Active"
+				LoadJson(tChild, "Toggled", tBind.m_bToggled);
+				LoadJson(tChild, "ClassMask", tBind.m_iClassMask);
+				LoadJson(tChild, "Surface", tBind.m_iSurface);
+				LoadJson(tChild, "Items", tBind.m_vItems);
+				LoadJson(tChild, "Collapsed", tBind.m_bCollapsed);
 				if (tBind.m_iParent < DEFAULT_BIND)
 					tBind.m_iParent = DEFAULT_BIND;
 

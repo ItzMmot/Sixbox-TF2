@@ -2804,7 +2804,7 @@ void CMenu::MenuSettings(int iTab)
 			}
 
 			Subheader("Condition");
-			FDropdown("Type", &tBind.m_iType, { "Key", "Class", "Weapon type", "Item slot", "Misc" });
+			FDropdown("Type", &tBind.m_iType, { "Key", "Class", "Weapon type", "Item slot", "Misc", "Group" });
 			switch (tBind.m_iType)
 			{
 			case BindEnum::Key: FDropdown("Behavior", &tBind.m_iInfo, { "Hold", "Toggle", "Double click" }); break;
@@ -2817,10 +2817,15 @@ void CMenu::MenuSettings(int iTab)
 				FKeybind("Key", tBind.m_iKey, FKeybindEnum::None, { Vars::Menu::PrimaryKey[DEFAULT_BIND], Vars::Menu::SecondaryKey[DEFAULT_BIND] });
 			{
 				int iNot = tBind.m_bNot;
-				FDropdown("While", &iNot, { "Active", "Not active" });
+				FDropdown(tBind.m_iType == BindEnum::Group ? "Filters##Group" : "While", &iNot, tBind.m_iType == BindEnum::Group ? std::vector<const char*>{ "Match", "Don't match" } : std::vector<const char*>{ "Active", "Not active" });
 				tBind.m_bNot = iNot;
 			}
 			FDropdown("Visibility", &tBind.m_iVisibility, { "Always", "While active", "Hidden" });
+
+			Subheader("Filters");
+			FDropdown("Classes", &tBind.m_iClassMask, { "Scout", "Soldier", "Pyro", "Demoman", "Heavy", "Engineer", "Medic", "Sniper", "Spy" }, {}, FDropdownEnum::Multi, 0, "Any");
+			FDropdown("Surface", &tBind.m_iSurface, { "Any", "Ground", "Air", "Water" });
+			FBindItemPicker(tBind.m_vItems);
 
 			const bool bMatch = iBind != DEFAULT_BIND && F::Binds.m_vBinds.size() > iBind;
 			const bool bParentValid = tBind.m_iParent == DEFAULT_BIND || F::Binds.m_vBinds.size() > tBind.m_iParent;
@@ -2873,7 +2878,8 @@ void CMenu::MenuSettings(int iTab)
 
 						if (iIndex == -1 && iParent == iLayer && iNumber <= i)
 							iIndex = _iBind;
-						fGetBinds(_iBind);
+						if (!(_tBind.m_iType == BindEnum::Group && _tBind.m_bCollapsed))
+							fGetBinds(_iBind);
 					}
 				};
 				fGetBinds(DEFAULT_BIND);
@@ -2911,6 +2917,26 @@ void CMenu::MenuSettings(int iTab)
 				FEmptyState("No binds yet", flListTop - H::Draw.Scale(16));
 
 			std::unordered_mapset<int> mBinds = {};
+			std::function<void(int)> fMarkHidden = [&](int iParent)
+			{	// children of collapsed groups aren't drawn but shouldn't end up as dangling
+				for (int _iBind = 0; _iBind < F::Binds.m_vBinds.size(); _iBind++)
+				{
+					if (F::Binds.m_vBinds[_iBind].m_iParent != iParent || mBinds.contains(_iBind))
+						continue;
+					mBinds[_iBind];
+					fMarkHidden(_iBind);
+				}
+			};
+			auto fIsAncestor = [&](int iAncestor, int iBind)
+			{
+				for (int i = 0; iBind != DEFAULT_BIND && iBind >= 0 && iBind < F::Binds.m_vBinds.size() && i <= F::Binds.m_vBinds.size(); i++)
+				{
+					if (iBind == iAncestor)
+						return true;
+					iBind = F::Binds.m_vBinds[iBind].m_iParent;
+				}
+				return false;
+			};
 			std::function<void(int, int)> fGetBinds = [&](int iParent, int x)
 			{
 				for (int _iBind = 0; _iBind < F::Binds.m_vBinds.size(); _iBind++)
@@ -2922,72 +2948,7 @@ void CMenu::MenuSettings(int iTab)
 					mBinds[_iBind];
 
 					std::string sType; std::string sInfo;
-					switch (_tBind.m_iType)
-					{
-					case BindEnum::Key:
-						switch (_tBind.m_iInfo)
-						{
-						case BindEnum::KeyEnum::Hold: { sType = "hold"; break; }
-						case BindEnum::KeyEnum::Toggle: { sType = "toggle"; break; }
-						case BindEnum::KeyEnum::DoubleClick: { sType = "double"; break; }
-						}
-						sInfo = U::KeyHandler.String(_tBind.m_iKey);
-						break;
-					case BindEnum::Class:
-						sType = "class";
-						switch (_tBind.m_iInfo)
-						{
-						case BindEnum::ClassEnum::Scout: { sInfo = "scout"; break; }
-						case BindEnum::ClassEnum::Soldier: { sInfo = "soldier"; break; }
-						case BindEnum::ClassEnum::Pyro: { sInfo = "pyro"; break; }
-						case BindEnum::ClassEnum::Demoman: { sInfo = "demoman"; break; }
-						case BindEnum::ClassEnum::Heavy: { sInfo = "heavy"; break; }
-						case BindEnum::ClassEnum::Engineer: { sInfo = "engineer"; break; }
-						case BindEnum::ClassEnum::Medic: { sInfo = "medic"; break; }
-						case BindEnum::ClassEnum::Sniper: { sInfo = "sniper"; break; }
-						case BindEnum::ClassEnum::Spy: { sInfo = "spy"; break; }
-						}
-						break;
-					case BindEnum::WeaponType:
-						sType = "weapon";
-						switch (_tBind.m_iInfo)
-						{
-						case BindEnum::WeaponTypeEnum::Hitscan: { sInfo = "hitscan"; break; }
-						case BindEnum::WeaponTypeEnum::Projectile: { sInfo = "projectile"; break; }
-						case BindEnum::WeaponTypeEnum::Melee: { sInfo = "melee"; break; }
-						case BindEnum::WeaponTypeEnum::Throwable: { sInfo = "throwable"; break; }
-						}
-						break;
-					case BindEnum::ItemSlot:
-						sType = "slot";
-						sInfo = std::format("{}", _tBind.m_iInfo + 1);
-						break;
-					case BindEnum::Misc:
-						switch (_tBind.m_iInfo)
-						{
-						case BindEnum::MiscEnum::Spectated:
-						case BindEnum::MiscEnum::SpectatedFirst:
-						case BindEnum::MiscEnum::SpectatedThird:
-							sType = "spectated";
-							switch (_tBind.m_iInfo)
-							{
-							case BindEnum::MiscEnum::Spectated: { sInfo = "any"; break; }
-							case BindEnum::MiscEnum::SpectatedFirst: { sInfo = "1st"; break; }
-							case BindEnum::MiscEnum::SpectatedThird: { sInfo = "3rd"; break; }
-							}
-							break;
-						case BindEnum::MiscEnum::Zoomed:
-						case BindEnum::MiscEnum::Aiming:
-							sType = "cond";
-							switch (_tBind.m_iInfo)
-							{
-							case BindEnum::MiscEnum::Zoomed: { sInfo = "zoomed"; break; }
-							case BindEnum::MiscEnum::Aiming: { sInfo = "aiming"; break; }
-							}
-							break;
-						}
-						break;
-					}
+					CBinds::Describe(_tBind, sType, sInfo);
 					if (_tBind.m_bNot && (_tBind.m_iType != BindEnum::Key || _tBind.m_iInfo == BindEnum::KeyEnum::Hold))
 						sType = std::format("not {}", sType);
 
@@ -3006,7 +2967,17 @@ void CMenu::MenuSettings(int iTab)
 						bToggle = bBoxHovered && tRow.m_bClicked;
 					}
 
-					const float flTextX = tRow.m_vMin.x + H::Draw.Scale(32);
+					const bool bGroup = _tBind.m_iType == BindEnum::Group;
+					bool bCollapse = false;
+					if (bGroup)
+					{
+						ImFont* pIcon = F::Render.IconFont;
+						const ImVec2 vIcon = { tRow.m_vMin.x + H::Draw.Scale(30), floorf(flCenter - pIcon->LegacySize / 2) };
+						const bool bIconHovered = tRow.m_bWithin && IsMouseHoveringRect(vIcon - ImVec2(H::Draw.Scale(2), H::Draw.Scale(2)), vIcon + ImVec2(pIcon->LegacySize + H::Draw.Scale(2), pIcon->LegacySize + H::Draw.Scale(2)));
+						pDrawList->AddText(pIcon, pIcon->LegacySize, vIcon, FadeColor(bIconHovered ? F::Render.Active.Value : ImVec4(MixColor(F::Render.Inactive, F::Render.Active, 0.5f))), _tBind.m_bCollapsed ? ICON_MD_CHEVRON_RIGHT : ICON_MD_EXPAND_MORE);
+						bCollapse = bIconHovered && tRow.m_bClicked;
+					}
+					const float flTextX = tRow.m_vMin.x + H::Draw.Scale(bGroup ? 52 : 32);
 					const std::string sMeta = sInfo.empty() ? sType : std::format("{}  {}", sType, sInfo);
 					ImFont* pSmall = F::Render.FontSmall;
 					const float flMeta = pSmall->CalcTextSizeA(pSmall->LegacySize, FLT_MAX, 0.f, sMeta.c_str()).x;
@@ -3034,6 +3005,8 @@ void CMenu::MenuSettings(int iTab)
 
 					if (bToggle)
 						_tBind.m_bEnabled = !_tBind.m_bEnabled;
+					else if (bCollapse)
+						_tBind.m_bCollapsed = !_tBind.m_bCollapsed;
 					else if (tRow.m_bClicked && !bDelete)
 					{
 						iBind = _iBind;
@@ -3055,6 +3028,35 @@ void CMenu::MenuSettings(int iTab)
 							CurrentBind = CurrentBind != _iBind ? _iBind : DEFAULT_BIND;
 						if (FMenuItem(_tBind.m_bEnabled ? "Disable" : "Enable", _tBind.m_bEnabled ? ICON_MD_TOGGLE_OFF : ICON_MD_TOGGLE_ON))
 							_tBind.m_bEnabled = !_tBind.m_bEnabled;
+						if (bGroup && FMenuItem(_tBind.m_bCollapsed ? "Expand" : "Collapse", _tBind.m_bCollapsed ? ICON_MD_EXPAND_MORE : ICON_MD_CHEVRON_RIGHT))
+							_tBind.m_bCollapsed = !_tBind.m_bCollapsed;
+						if (FBeginMenu("Move to group", ICON_MD_DRIVE_FILE_MOVE))
+						{
+							bool bAny = false;
+							for (int iGroup = 0; iGroup < int(F::Binds.m_vBinds.size()); iGroup++)
+							{
+								auto& tGroup = F::Binds.m_vBinds[iGroup];
+								if (tGroup.m_iType != BindEnum::Group || iGroup == _tBind.m_iParent || fIsAncestor(_iBind, iGroup))
+									continue;
+
+								bAny = true;
+								if (FMenuItem(std::format("{}##Group{}", tGroup.m_sName, iGroup).c_str(), ICON_MD_FOLDER))
+								{
+									_tBind.m_iParent = iGroup;
+									if (iBind == _iBind)
+										tBind.m_iParent = iGroup;
+								}
+							}
+							if (!bAny)
+								FMenuNote("No groups available");
+							ImGui::EndMenu();
+						}
+						if (_tBind.m_iParent != DEFAULT_BIND && FMenuItem("Remove from parent", ICON_MD_LOGOUT))
+						{
+							_tBind.m_iParent = DEFAULT_BIND;
+							if (iBind == _iBind)
+								tBind.m_iParent = DEFAULT_BIND;
+						}
 						FMenuSeparator();
 						if (FMenuItem("Delete", ICON_MD_DELETE, F::Render.Danger, FMenuItemEnum::TintLabel))
 							bDelete = true;
@@ -3083,7 +3085,12 @@ void CMenu::MenuSettings(int iTab)
 					PopID();
 
 					if (iParent != DEFAULT_BIND - 1)
-						fGetBinds(_iBind, x + 1);
+					{
+						if (bGroup && _tBind.m_bCollapsed)
+							fMarkHidden(_iBind);
+						else
+							fGetBinds(_iBind, x + 1);
+					}
 				}
 			};
 			fGetBinds(DEFAULT_BIND, 0);
@@ -3627,72 +3634,7 @@ void CMenu::DrawBinds()
 			if (tBind.m_iVisibility == BindVisibilityEnum::Always || tBind.m_iVisibility == BindVisibilityEnum::WhileActive && tBind.m_bActive || m_bIsOpen)
 			{
 				std::string sType; std::string sInfo;
-				switch (tBind.m_iType)
-				{
-				case BindEnum::Key:
-					switch (tBind.m_iInfo)
-					{
-					case BindEnum::KeyEnum::Hold: { sType = "hold"; break; }
-					case BindEnum::KeyEnum::Toggle: { sType = "toggle"; break; }
-					case BindEnum::KeyEnum::DoubleClick: { sType = "double"; break; }
-					}
-					sInfo = U::KeyHandler.String(tBind.m_iKey);
-					break;
-				case BindEnum::Class:
-					sType = "class";
-					switch (tBind.m_iInfo)
-					{
-					case BindEnum::ClassEnum::Scout: { sInfo = "scout"; break; }
-					case BindEnum::ClassEnum::Soldier: { sInfo = "soldier"; break; }
-					case BindEnum::ClassEnum::Pyro: { sInfo = "pyro"; break; }
-					case BindEnum::ClassEnum::Demoman: { sInfo = "demoman"; break; }
-					case BindEnum::ClassEnum::Heavy: { sInfo = "heavy"; break; }
-					case BindEnum::ClassEnum::Engineer: { sInfo = "engineer"; break; }
-					case BindEnum::ClassEnum::Medic: { sInfo = "medic"; break; }
-					case BindEnum::ClassEnum::Sniper: { sInfo = "sniper"; break; }
-					case BindEnum::ClassEnum::Spy: { sInfo = "spy"; break; }
-					}
-					break;
-				case BindEnum::WeaponType:
-					sType = "weapon";
-					switch (tBind.m_iInfo)
-					{
-					case BindEnum::WeaponTypeEnum::Hitscan: { sInfo = "hitscan"; break; }
-					case BindEnum::WeaponTypeEnum::Projectile: { sInfo = "projectile"; break; }
-					case BindEnum::WeaponTypeEnum::Melee: { sInfo = "melee"; break; }
-					case BindEnum::WeaponTypeEnum::Throwable: { sInfo = "throwable"; break; }
-					}
-					break;
-				case BindEnum::ItemSlot:
-					sType = "slot";
-					sInfo = std::format("{}", tBind.m_iInfo + 1);
-					break;
-				case BindEnum::Misc:
-					switch (tBind.m_iInfo)
-					{
-					case BindEnum::MiscEnum::Spectated:
-					case BindEnum::MiscEnum::SpectatedFirst:
-					case BindEnum::MiscEnum::SpectatedThird:
-						sType = "spectated";
-						switch (tBind.m_iInfo)
-						{
-						case BindEnum::MiscEnum::Spectated: { sInfo = "any"; break; }
-						case BindEnum::MiscEnum::SpectatedFirst: { sInfo = "1st"; break; }
-						case BindEnum::MiscEnum::SpectatedThird: { sInfo = "3rd"; break; }
-						}
-						break;
-					case BindEnum::MiscEnum::Zoomed:
-					case BindEnum::MiscEnum::Aiming:
-						sType = "cond";
-						switch (tBind.m_iInfo)
-						{
-						case BindEnum::MiscEnum::Zoomed: { sInfo = "zoomed"; break; }
-						case BindEnum::MiscEnum::Aiming: { sInfo = "aiming"; break; }
-						}
-						break;
-					}
-					break;
-				}
+				CBinds::Describe(tBind, sType, sInfo);
 				if (tBind.m_bNot && (tBind.m_iType != BindEnum::Key || tBind.m_iInfo == BindEnum::KeyEnum::Hold))
 					sInfo = std::format("not {}", sInfo);
 

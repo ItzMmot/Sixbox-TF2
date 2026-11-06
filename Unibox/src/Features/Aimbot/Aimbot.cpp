@@ -7,6 +7,7 @@
 #include "AutoDetonate/AutoDetonate.h"
 #include "AutoAirblast/AutoAirblast.h"
 #include "AutoHeal/AutoHeal.h"
+#include "AutoSapper/AutoSapper.h"
 #include "AutoRocketJump/AutoRocketJump.h"
 #include "../Misc/Misc.h"
 #include "../Visuals/Visuals.h"
@@ -115,6 +116,7 @@ void CAimbot::RunMain(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 	F::AutoDetonate.Run(pLocal, pCmd);
 	F::AutoAirblast.Run(pLocal, pWeapon, pCmd);
 	F::AutoHeal.Run(pLocal, pWeapon, pCmd);
+	F::AutoSapper.Run(pLocal, pWeapon, pCmd);
 
 	auto iWeaponID = pWeapon->GetWeaponID();
 	if (iWeaponID == TF_WEAPON_PASSTIME_GUN)

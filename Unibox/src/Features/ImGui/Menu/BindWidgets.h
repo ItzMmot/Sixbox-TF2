@@ -3,6 +3,38 @@
 
 namespace ImGui
 {
+	// searchable item filter for binds, picks every definition index sharing the chosen name
+	inline bool FBindItemPicker(std::vector<int>& vItems, int iFlags = FDropdownEnum::None, bool* pHovered = nullptr)
+	{
+		const auto& vList = CBinds::GetItemList();
+
+		static std::vector<const char*> s_vEntries = {};
+		static const void* s_pLastList = nullptr;
+		static size_t s_uLastSize = 0;
+		if (s_pLastList != vList.data() || s_uLastSize != vList.size())
+		{
+			s_vEntries = { "None" };
+			for (auto& [sName, _] : vList)
+				s_vEntries.push_back(sName.c_str());
+			s_pLastList = vList.data(), s_uLastSize = vList.size();
+		}
+
+		std::string sCurrent = CBinds::GetItemName(vItems);
+		const std::string sOld = sCurrent;
+		const bool bReturn = FSDropdown("Item in loadout", &sCurrent, s_vEntries, iFlags, 0, pHovered);
+		if (sCurrent != sOld)
+		{
+			vItems.clear();
+			if (sCurrent != "None")
+			{
+				auto it = std::lower_bound(vList.begin(), vList.end(), sCurrent, [](const auto& tPair, const std::string& s) { return tPair.first < s; });
+				if (it != vList.end() && it->first == sCurrent)
+					vItems = it->second;
+			}
+		}
+		return bReturn;
+	}
+
 	// convar wrappers
 	template <class T>
 	inline int GetBind(ConfigVar<T>& tVar, bool bForce = false)
@@ -227,7 +259,7 @@ namespace ImGui
 			SetCursorPos(vOriginalPos);
 		}
 
-		FDropdown("Type", &tBind.m_iType, { "Key", "Class", "Weapon type", "Item slot", "Misc" }, {}, FDropdownEnum::Left, 0, "None", &bHovered);
+		FDropdown("Type", &tBind.m_iType, { "Key", "Class", "Weapon type", "Item slot", "Misc", "Group" }, {}, tBind.m_iType == BindEnum::Group ? FDropdownEnum::None : FDropdownEnum::Left, 0, "None", &bHovered);
 		bLastHovered |= bHovered;
 		switch (tBind.m_iType)
 		{
@@ -244,6 +276,12 @@ namespace ImGui
 			FKeybind("Key", tBind.m_iKey, FKeybindEnum::None, { Vars::Menu::PrimaryKey[DEFAULT_BIND], Vars::Menu::SecondaryKey[DEFAULT_BIND] }, { 0, 30 }, 0, &bHovered);
 			bLastHovered |= bHovered;
 		}
+		FDropdown("Classes", &tBind.m_iClassMask, { "Scout", "Soldier", "Pyro", "Demoman", "Heavy", "Engineer", "Medic", "Sniper", "Spy" }, {}, FDropdownEnum::Left | FDropdownEnum::Multi, 0, "Any", &bHovered);
+		bLastHovered |= bHovered;
+		FDropdown("Surface", &tBind.m_iSurface, { "Any", "Ground", "Air", "Water" }, {}, FDropdownEnum::Right, 0, "None", &bHovered);
+		bLastHovered |= bHovered;
+		FBindItemPicker(tBind.m_vItems, FDropdownEnum::None, &bHovered);
+		bLastHovered |= bHovered;
 		Divider(H::Draw.Scale(6), H::Draw.Scale(4));
 
 		if (!Disabled && iBind != DEFAULT_BIND && iBind < F::Binds.m_vBinds.size())
@@ -258,6 +296,9 @@ namespace ImGui
 			_tBind.m_bEnabled = tBind.m_bEnabled;
 			_tBind.m_iVisibility = tBind.m_iVisibility;
 			_tBind.m_bNot = tBind.m_bNot;
+			_tBind.m_iClassMask = tBind.m_iClassMask;
+			_tBind.m_iSurface = tBind.m_iSurface;
+			_tBind.m_vItems = tBind.m_vItems;
 		}
 
 		return iBind;

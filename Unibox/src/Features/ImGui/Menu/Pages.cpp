@@ -404,6 +404,22 @@ static void AimbotSupport()
 		FSlider(Vars::Aimbot::AutoEngie::AutoUpgradeDispenserLVL);
 		FSlider(Vars::Aimbot::AutoEngie::AutoUpgradeTeleporterLVL);
 	} EndSection();
+	if (Section("Auto Sapper"))
+	{
+		FToggle(Vars::Aimbot::AutoSapper::AutoEquip);
+		FTooltip("Takes out the sapper when an enemy building can be sapped. Needs an aim type other than off.");
+		FToggle(Vars::Aimbot::AutoSapper::SwitchBack);
+		FTooltip("Switches back to the previous weapon once there is nothing left to sap.");
+		FToggle(Vars::Aimbot::AutoSapper::CheckEnemyView);
+		FTooltip("Doesn't take out the sapper while an enemy is looking at you.");
+		PushTransparent(!Vars::Aimbot::AutoSapper::CheckEnemyView.Value);
+		{
+			FSlider(Vars::Aimbot::AutoSapper::EnemyViewFOV);
+			FToggle(Vars::Aimbot::AutoSapper::IgnoreEngineer);
+			FTooltip("The engineer who built the targeted building is not counted as looking at you.");
+		}
+		PopTransparent();
+	} EndSection();
 	if (Section("Zombie infection"))
 	{
 		FDropdown(Vars::Aimbot::Zombie::Abilities);

@@ -3,6 +3,8 @@
 #include "../ImGui/Menu/Menu.h"
 #include "../Configs/Configs.h"
 #include <functional>
+#include <map>
+#include "../Visuals/SkinChanger/SkinChanger.h"
 
 #define IsType(t) pBase->m_iType == typeid(t).hash_code()
 
@@ -56,6 +58,7 @@ static inline void GetBinds(int iParent, CTFPlayer* pLocal, CTFWeaponBase* pWeap
 			continue;
 		if (bManage)
 		{
+			tBind.m_bFiltersMet = CBinds::CheckFilters(tBind, pLocal);
 			switch (tBind.m_iType)
 			{
 			case BindEnum::Key:
@@ -68,6 +71,7 @@ static inline void GetBinds(int iParent, CTFPlayer* pLocal, CTFWeaponBase* pWeap
 				case BindEnum::KeyEnum::DoubleClick: bKey = U::KeyHandler.Double(tBind.m_iKey, false, &tBind.m_tKeyStorage); break;
 				}
 				bKey &= !s_bUI || s_bMenu && (!F::Menu.m_bWindowHovered || tBind.m_iKey != VK_LBUTTON && tBind.m_iKey != VK_RBUTTON); // allow in menu
+				bKey &= tBind.m_bFiltersMet; // filtered out binds don't consume inputs, so one key can serve several classes
 
 				switch (tBind.m_iInfo)
 				{
@@ -79,10 +83,14 @@ static inline void GetBinds(int iParent, CTFPlayer* pLocal, CTFWeaponBase* pWeap
 				case BindEnum::KeyEnum::Toggle:
 				case BindEnum::KeyEnum::DoubleClick:
 					if (bKey)
-						tBind.m_bActive = !tBind.m_bActive;
+						tBind.m_bToggled = !tBind.m_bToggled;
+					tBind.m_bActive = tBind.m_bToggled;
 				}
 				break;
 			}
+			case BindEnum::Group:
+				tBind.m_bActive = true;
+				break;
 			case BindEnum::Class:
 			{
 				const int iClass = pLocal ? pLocal->m_iClass() : TF_CLASS_UNDEFINED;
@@ -170,6 +178,11 @@ static inline void GetBinds(int iParent, CTFPlayer* pLocal, CTFWeaponBase* pWeap
 				break;
 			}
 			}
+
+			if (tBind.m_iType == BindEnum::Group && tBind.m_bNot)
+				tBind.m_bActive = !tBind.m_bFiltersMet; // "not" on a group inverts its filters
+			else
+				tBind.m_bActive &= tBind.m_bFiltersMet;
 		}
 
 		if (tBind.m_bActive)
@@ -451,4 +464,188 @@ void CBinds::Move(int i1, int i2)
 		else Swap(DragBox_t, i1, i2)
 		else Swap(WindowBox_t, i1, i2)
 	}
+}
+
+
+bool CBinds::CheckFilters(const Bind_t& tBind, CTFPlayer* pLocal)
+{
+	if (!tBind.HasFilters())
+		return true;
+	if (!pLocal)
+		return false;
+
+	if (tBind.m_iClassMask)
+	{
+		const int iClass = pLocal->m_iClass(); // TF_CLASS_SCOUT = 1 ... TF_CLASS_ENGINEER = 9, ClassEnum is ordered differently
+		int iBit = -1;
+		switch (iClass)
+		{
+		case TF_CLASS_SCOUT: iBit = BindEnum::ClassEnum::Scout; break;
+		case TF_CLASS_SOLDIER: iBit = BindEnum::ClassEnum::Soldier; break;
+		case TF_CLASS_PYRO: iBit = BindEnum::ClassEnum::Pyro; break;
+		case TF_CLASS_DEMOMAN: iBit = BindEnum::ClassEnum::Demoman; break;
+		case TF_CLASS_HEAVY: iBit = BindEnum::ClassEnum::Heavy; break;
+		case TF_CLASS_ENGINEER: iBit = BindEnum::ClassEnum::Engineer; break;
+		case TF_CLASS_MEDIC: iBit = BindEnum::ClassEnum::Medic; break;
+		case TF_CLASS_SNIPER: iBit = BindEnum::ClassEnum::Sniper; break;
+		case TF_CLASS_SPY: iBit = BindEnum::ClassEnum::Spy; break;
+		}
+		if (iBit == -1 || !(tBind.m_iClassMask & (1 << iBit)))
+			return false;
+	}
+
+	switch (tBind.m_iSurface)
+	{
+	case BindEnum::SurfaceEnum::Ground:
+		if (!pLocal->IsOnGround())
+			return false;
+		break;
+	case BindEnum::SurfaceEnum::Air:
+		if (pLocal->IsOnGround() || pLocal->IsSwimming())
+			return false;
+		break;
+	case BindEnum::SurfaceEnum::Water:
+		if (!pLocal->IsSwimming())
+			return false;
+		break;
+	}
+
+	if (!tBind.m_vItems.empty())
+	{
+		auto fMatches = [&](int iDef) { return std::find(tBind.m_vItems.begin(), tBind.m_vItems.end(), iDef) != tBind.m_vItems.end(); };
+		bool bFound = false;
+		auto& aWeapons = pLocal->m_hMyWeapons();
+		for (int i = 0; i < MAX_WEAPONS && !bFound; i++)
+		{
+			auto pWeapon = aWeapons[i].Get();
+			bFound = pWeapon && fMatches(pWeapon->m_iItemDefinitionIndex());
+		}
+		auto& vWearables = pLocal->m_hMyWearables();
+		for (int i = 0; i < vWearables.Count() && !bFound; i++)
+		{
+			auto pWearable = vWearables[i].Get();
+			bFound = pWearable && fMatches(pWearable->m_iItemDefinitionIndex());
+		}
+		if (!bFound)
+			return false;
+	}
+
+	return true;
+}
+
+void CBinds::Describe(const Bind_t& tBind, std::string& sType, std::string& sInfo)
+{
+	static const char* aClasses[] = { "scout", "soldier", "pyro", "demoman", "heavy", "engineer", "medic", "sniper", "spy" };
+
+	sType.clear(), sInfo.clear();
+	switch (tBind.m_iType)
+	{
+	case BindEnum::Key:
+		switch (tBind.m_iInfo)
+		{
+		case BindEnum::KeyEnum::Hold: sType = "hold"; break;
+		case BindEnum::KeyEnum::Toggle: sType = "toggle"; break;
+		case BindEnum::KeyEnum::DoubleClick: sType = "double"; break;
+		}
+		sInfo = U::KeyHandler.String(tBind.m_iKey);
+		break;
+	case BindEnum::Class:
+		sType = "class";
+		if (tBind.m_iInfo >= 0 && tBind.m_iInfo < int(std::size(aClasses)))
+			sInfo = aClasses[tBind.m_iInfo];
+		break;
+	case BindEnum::WeaponType:
+		sType = "weapon";
+		switch (tBind.m_iInfo)
+		{
+		case BindEnum::WeaponTypeEnum::Hitscan: sInfo = "hitscan"; break;
+		case BindEnum::WeaponTypeEnum::Projectile: sInfo = "projectile"; break;
+		case BindEnum::WeaponTypeEnum::Melee: sInfo = "melee"; break;
+		case BindEnum::WeaponTypeEnum::Throwable: sInfo = "throwable"; break;
+		}
+		break;
+	case BindEnum::ItemSlot:
+		sType = "slot";
+		sInfo = std::format("{}", tBind.m_iInfo + 1);
+		break;
+	case BindEnum::Misc:
+		switch (tBind.m_iInfo)
+		{
+		case BindEnum::MiscEnum::Spectated: sType = "spectated", sInfo = "any"; break;
+		case BindEnum::MiscEnum::SpectatedFirst: sType = "spectated", sInfo = "1st"; break;
+		case BindEnum::MiscEnum::SpectatedThird: sType = "spectated", sInfo = "3rd"; break;
+		case BindEnum::MiscEnum::Zoomed: sType = "cond", sInfo = "zoomed"; break;
+		case BindEnum::MiscEnum::Aiming: sType = "cond", sInfo = "aiming"; break;
+		}
+		break;
+	case BindEnum::Group:
+		sType = "group";
+		break;
+	}
+
+	const std::string sFilters = DescribeFilters(tBind);
+	if (!sFilters.empty())
+		sInfo = sInfo.empty() ? sFilters : std::format("{} | {}", sInfo, sFilters);
+}
+
+std::string CBinds::DescribeFilters(const Bind_t& tBind)
+{
+	static const char* aClasses[] = { "sc", "so", "py", "de", "hw", "en", "me", "sn", "sp" };
+
+	std::string sOut;
+	auto fAdd = [&](const std::string& s) { sOut += sOut.empty() ? s : " " + s; };
+
+	if (tBind.m_iClassMask)
+	{
+		std::string sClasses;
+		for (int i = 0; i < int(std::size(aClasses)); i++)
+		{
+			if (tBind.m_iClassMask & (1 << i))
+				sClasses += sClasses.empty() ? aClasses[i] : std::string("/") + aClasses[i];
+		}
+		fAdd(sClasses);
+	}
+	switch (tBind.m_iSurface)
+	{
+	case BindEnum::SurfaceEnum::Ground: fAdd("ground"); break;
+	case BindEnum::SurfaceEnum::Air: fAdd("air"); break;
+	case BindEnum::SurfaceEnum::Water: fAdd("water"); break;
+	}
+	if (!tBind.m_vItems.empty())
+		fAdd(GetItemName(tBind.m_vItems));
+	return sOut;
+}
+
+std::string CBinds::GetItemName(const std::vector<int>& vItems)
+{
+	if (vItems.empty())
+		return "None";
+	for (const auto& tItem : CSkinChanger::GetItems())
+	{
+		if (tItem.iDef == vItems.front())
+			return tItem.sName;
+	}
+	return std::format("#{}", vItems.front());
+}
+
+const std::vector<std::pair<std::string, std::vector<int>>>& CBinds::GetItemList()
+{
+	static std::vector<std::pair<std::string, std::vector<int>>> s_vList = {};
+	static size_t s_uLastSize = 0;
+	static const ItemInfo_t* s_pLastData = nullptr;
+
+	const auto& vItems = CSkinChanger::GetItems();
+	if (vItems.size() == s_uLastSize && vItems.data() == s_pLastData)
+		return s_vList;
+	s_uLastSize = vItems.size(), s_pLastData = vItems.data();
+
+	// group by display name so stock/upgradeable/reskinned duplicates (e.g. 18 and 205) all match
+	std::map<std::string, std::vector<int>> mByName = {};
+	for (const auto& tItem : vItems)
+	{
+		if (!tItem.sName.empty())
+			mByName[tItem.sName].push_back(tItem.iDef);
+	}
+	s_vList.assign(mByName.begin(), mByName.end());
+	return s_vList;
 }
