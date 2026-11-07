@@ -1,0 +1,281 @@
+#include "PlayerCore.h"
+
+#include "PlayerUtils.h"
+#include "SteamProfileCache.h"
+#include "../Configs/Configs.h"
+
+#include <utility>
+
+void CPlayerlistCore::Run()
+{
+	F::SteamProfileCache.Pump();
+
+	static Timer tTimer = {};
+	if (!tTimer.Run(1.f))
+		return;
+
+	LoadPlayerlist();
+	SavePlayerlist();
+	LoadCheaterlist();
+	SaveCheaterlist();
+}
+
+void CPlayerlistCore::SavePlayerlist()
+{
+	if (!F::PlayerUtils.m_bSave || F::PlayerUtils.m_bLoad) // terrible if we end up saving while loading
+		return;
+
+	F::PlayerUtils.m_bSave = false;
+
+	try
+	{
+		boost::property_tree::ptree tWrite;
+
+		{
+			boost::property_tree::ptree tSub;
+			for (auto it = F::PlayerUtils.m_vTags.begin(); it != F::PlayerUtils.m_vTags.end(); it++)
+			{
+				int iID = std::distance(F::PlayerUtils.m_vTags.begin(), it);
+				auto& tTag = *it;
+
+				boost::property_tree::ptree tChild;
+				F::Configs.SaveJson(tChild, "Name", tTag.m_sName);
+				F::Configs.SaveJson(tChild, "Color", tTag.m_tColor);
+				F::Configs.SaveJson(tChild, "Priority", tTag.m_iPriority);
+				F::Configs.SaveJson(tChild, "FollowPriority", tTag.m_iFollowPriority);
+				F::Configs.SaveJson(tChild, "VotePriority", tTag.m_iVotePriority);
+				F::Configs.SaveJson(tChild, "Label", tTag.m_bLabel);
+
+				tSub.put_child(std::to_string(F::PlayerUtils.IndexToTag(iID)), tChild);
+			}
+			tWrite.put_child("Config", tSub);
+		}
+
+		{
+			boost::property_tree::ptree tSub;
+			for (auto& [uAccountID, vTags] : F::PlayerUtils.m_mPlayerTags)
+			{
+				if (vTags.empty())
+					continue;
+
+				boost::property_tree::ptree tChild;
+				for (auto& iID : vTags)
+				{
+					boost::property_tree::ptree t;
+					t.put("", F::PlayerUtils.IndexToTag(iID));
+					tChild.push_back({ "", t });
+				}
+
+				tSub.put_child(std::to_string(uAccountID), tChild);
+			}
+			tWrite.put_child("Tags", tSub);
+		}
+
+		{
+			boost::property_tree::ptree tSub;
+			for (auto& [uAccountID, sAlias] : F::PlayerUtils.m_mPlayerAliases)
+			{
+				if (!sAlias.empty())
+					tSub.put(std::to_string(uAccountID), sAlias);
+			}
+			tWrite.put_child("Aliases", tSub);
+		}
+
+		write_json(F::Configs.m_sCorePath + "Players.json", tWrite);
+
+		SDK::Output("SixBox", "Saved playerlist", INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Save playerlist failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+	}
+}
+
+void CPlayerlistCore::LoadPlayerlist()
+{
+	if (!F::PlayerUtils.m_bLoad)
+		return;
+
+	decltype(F::PlayerUtils.m_vTags) vOldTags;
+	decltype(F::PlayerUtils.m_mPlayerTags) mOldPlayerTags;
+	decltype(F::PlayerUtils.m_mPlayerAliases) mOldPlayerAliases;
+	bool bOldSave = false;
+	bool bTransaction = false;
+	try
+	{
+		if (!std::filesystem::exists(F::Configs.m_sCorePath + "Players.json"))
+		{
+			F::PlayerUtils.m_bLoad = false;
+			return;
+		}
+
+		boost::property_tree::ptree tRead;
+		read_json(F::Configs.m_sCorePath + "Players.json", tRead);
+		vOldTags = F::PlayerUtils.m_vTags;
+		mOldPlayerTags = F::PlayerUtils.m_mPlayerTags;
+		mOldPlayerAliases = F::PlayerUtils.m_mPlayerAliases;
+		bOldSave = F::PlayerUtils.m_bSave;
+		bTransaction = true;
+
+		F::PlayerUtils.m_mPlayerTags.clear();
+		F::PlayerUtils.m_mPlayerAliases.clear();
+		F::PlayerUtils.m_vTags = {
+			{ "Default", { 200, 200, 200, 255 }, 0, 0, 0, false, false, true },
+			{ "Ignored", { 200, 200, 200, 255 }, -1, 0, -1, false, true, true },
+			{ "Cheater", { 255, 100, 100, 255 }, 1, 0, 0, false, true, true },
+			{ "Friend", { 100, 255, 100, 255 }, 0, 2, -1, true, false, true },
+			{ "Party", { 100, 100, 255, 255 }, 0, 1, -1, true, false, true },
+			{ "F2P", { 255, 255, 255, 255 }, 0, 0, 0, true, false, true }
+		};
+
+		if (auto tSub = tRead.get_child_optional("Config"))
+		{
+			for (auto& [sName, tChild] : *tSub)
+			{
+				PriorityLabel_t tTag = {};
+				F::Configs.LoadJson(tChild, "Name", tTag.m_sName);
+				F::Configs.LoadJson(tChild, "Color", tTag.m_tColor);
+				F::Configs.LoadJson(tChild, "Priority", tTag.m_iPriority);
+				F::Configs.LoadJson(tChild, "FollowPriority", tTag.m_iFollowPriority);
+				F::Configs.LoadJson(tChild, "VotePriority", tTag.m_iVotePriority);
+				F::Configs.LoadJson(tChild, "Label", tTag.m_bLabel);
+
+				int iID = F::PlayerUtils.TagToIndex(std::stoi(sName));
+				if (iID > -1 && iID < F::PlayerUtils.m_vTags.size()) 
+				{
+					F::PlayerUtils.m_vTags[iID].m_sName = tTag.m_sName;
+					F::PlayerUtils.m_vTags[iID].m_tColor = tTag.m_tColor;
+					F::PlayerUtils.m_vTags[iID].m_iPriority = tTag.m_iPriority;
+					F::PlayerUtils.m_vTags[iID].m_iFollowPriority = tTag.m_iFollowPriority;
+					F::PlayerUtils.m_vTags[iID].m_iVotePriority = tTag.m_iVotePriority;
+					F::PlayerUtils.m_vTags[iID].m_bLabel = tTag.m_bLabel;
+				}
+				else
+					F::PlayerUtils.m_vTags.push_back(tTag);
+			}
+		}
+		else
+			SDK::Output("SixBox", "Playerlist config not found", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+
+		if (auto tSub = tRead.get_child_optional("Tags"))
+		{
+			for (auto& [sName, tChild] : *tSub)
+			{
+				uint32_t uAccountID = std::stoul(sName);
+				for (auto& tTag : tChild | std::views::values)
+				{
+					const std::string& sTag = tTag.data();
+
+					int iID = F::PlayerUtils.TagToIndex(std::stoi(sTag));
+					auto pTag = F::PlayerUtils.GetTag(iID);
+					if (!pTag || !pTag->m_bAssignable)
+						continue;
+
+					if (!F::PlayerUtils.HasTag(uAccountID, iID))
+						F::PlayerUtils.AddTag(uAccountID, iID, false);
+				}
+			}
+		}
+		else
+			SDK::Output("SixBox", "Playerlist tags not found", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+
+		if (auto tSub = tRead.get_child_optional("Aliases"))
+		{
+			for (auto& [sName, jAlias] : *tSub)
+			{
+				uint32_t uAccountID = std::stoul(sName);
+				const std::string& sAlias = jAlias.data();
+
+				if (!sAlias.empty())
+					F::PlayerUtils.m_mPlayerAliases[uAccountID] = sAlias;
+			}
+		}
+		else
+			SDK::Output("SixBox", "Playerlist aliases not found", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+
+		SDK::Output("SixBox", "Loaded playerlist", INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		if (bTransaction)
+		{
+			F::PlayerUtils.m_vTags = std::move(vOldTags);
+			F::PlayerUtils.m_mPlayerTags = std::move(mOldPlayerTags);
+			F::PlayerUtils.m_mPlayerAliases = std::move(mOldPlayerAliases);
+			F::PlayerUtils.m_bSave = bOldSave;
+		}
+		SDK::Output("SixBox", "Load playerlist failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+	}
+	F::PlayerUtils.m_bLoad = false;
+}
+
+void CPlayerlistCore::SaveCheaterlist()
+{
+	if (!F::PlayerUtils.m_bCheaterSave || F::PlayerUtils.m_bCheaterLoad)
+		return;
+
+	try
+	{
+		const std::string sJson = F::PlayerUtils.ExportCheatersToJson();
+		std::ofstream fStream(F::Configs.m_sCorePath + "Cheaters.json", std::ios::out | std::ios::trunc);
+		if (!fStream)
+			throw std::ios_base::failure("failed to open cheaterlist");
+
+		fStream << sJson;
+		if (!fStream)
+			throw std::ios_base::failure("failed to write cheaterlist");
+
+		F::PlayerUtils.m_bCheaterSave = false;
+		SDK::Output("SixBox", "Saved cheaterlist", { 255, 150, 150 }, OUTPUT_CONSOLE | OUTPUT_DEBUG | OUTPUT_MENU);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Save cheaterlist failed", { 255, 150, 150, 127 }, OUTPUT_CONSOLE | OUTPUT_DEBUG);
+	}
+}
+
+void CPlayerlistCore::LoadCheaterlist()
+{
+	if (!F::PlayerUtils.m_bCheaterLoad)
+		return;
+
+	try
+	{
+		const std::string sPath = F::Configs.m_sCorePath + "Cheaters.json";
+		if (!std::filesystem::exists(sPath))
+		{
+			F::PlayerUtils.m_bCheaterLoad = false;
+			return;
+		}
+
+		std::ifstream fStream(sPath);
+		if (!fStream.is_open())
+		{
+			F::PlayerUtils.m_bCheaterLoad = false;
+			return;
+		}
+
+		std::string sContents((std::istreambuf_iterator<char>(fStream)), std::istreambuf_iterator<char>());
+		if (fStream.bad())
+		{
+			F::PlayerUtils.m_bCheaterLoad = false;
+			SDK::Output("SixBox", "Load cheaterlist failed", { 255, 150, 150, 127 }, OUTPUT_CONSOLE | OUTPUT_DEBUG);
+			return;
+		}
+
+		if (F::PlayerUtils.ImportCheatersFromJson(sContents, false))
+		{
+			F::PlayerUtils.m_bCheaterLoad = false;
+			SDK::Output("SixBox", "Loaded cheaterlist", { 255, 150, 150 }, OUTPUT_CONSOLE | OUTPUT_DEBUG | OUTPUT_MENU);
+		}
+		else
+		{
+			SDK::Output("SixBox", "Load cheaterlist failed", { 255, 150, 150, 127 }, OUTPUT_CONSOLE | OUTPUT_DEBUG);
+		}
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Load cheaterlist failed", { 255, 150, 150, 127 }, OUTPUT_CONSOLE | OUTPUT_DEBUG);
+	}
+	F::PlayerUtils.m_bCheaterLoad = false;
+}

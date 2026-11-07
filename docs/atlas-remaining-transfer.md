@@ -5,7 +5,7 @@ fixes and the current installed DLL are documented in
 [projectile-regressions.md](projectile-regressions.md).
 
 Completed on 5 November 2026. Scope: the four algorithmic areas left incomplete
-by the initial adaptation, implemented against Sixbox's SDK. Atlas files are not
+by the initial adaptation, implemented against SixBox's SDK. Atlas files are not
 imported into the project. This document records implementation and validation;
 it does not claim a measured improvement in gameplay accuracy.
 
@@ -79,7 +79,7 @@ it does not claim a measured improvement in gameplay accuracy.
   No runtime FreeType DLL is needed. Atomic installation and SHA256 comparison
   confirm the Proton copy is identical to the built artifact.
 
-Built artifact: `output/x64/ReleaseAVX2/Sixboxx64ReleaseFreetypeAVX2.dll`.
+Built artifact: `output/x64/ReleaseAVX2/SixBoxx64ReleaseFreetypeAVX2.dll`.
 Installed: `/home/ItzMmotX/.local/share/Steam/steamapps/compatdata/440/pfx/drive_c/Amalgamx64ReleaseFreetypeAVX2.dll`.
 Size: 6,368,768 bytes.
 SHA256: `5ed694b988f8f34f228c24b429f539351572eb8b58fa9013690ff59ff9c1df0f`.

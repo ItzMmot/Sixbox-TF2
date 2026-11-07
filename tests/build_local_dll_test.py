@@ -70,6 +70,20 @@ class LocalBuildTest(unittest.TestCase):
             (root / 'a.cpp').unlink()
             with self.assertRaises(RuntimeError): BUILD.project_sources(project)
 
+    def test_wine_case_preserving_output_rename(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); expected = root / 'SixBox.dll'
+            self.assertEqual(BUILD.normalize_output_case(expected), expected)
+            old = root / 'Sixbox.dll'; old.write_bytes(b'linked DLL')
+            BUILD.normalize_output_case(expected)
+            self.assertFalse(old.exists())
+            self.assertEqual(expected.read_bytes(), b'linked DLL')
+            BUILD.normalize_output_case(expected)
+            old.write_bytes(b'another DLL')
+            with self.assertRaises(RuntimeError): BUILD.normalize_output_case(expected)
+            self.assertEqual(old.read_bytes(), b'another DLL')
+            self.assertEqual(expected.read_bytes(), b'linked DLL')
+
     def test_release_pe_validation(self):
         self.assertEqual(BUILD.pe_imports(image()), ['kernel32.dll'])
         for name in [b'msvcp140d.dll', b'vcruntime140d.dll', b'ucrtbased.dll', b'freetype.dll']:
@@ -88,6 +102,33 @@ class LocalBuildTest(unittest.TestCase):
             self.assertEqual(Path(receipt['backup']).read_bytes(), image(marker=1))
             BUILD.install(source, target, root / 'backups')
             self.assertEqual(len(list((root / 'backups').glob('*.dll'))), 1)
+
+    def test_renamed_launcher_preserves_steam_command_and_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); backups = root / 'backups'
+            legacy = root / 'inject-amalgam-offline.bat'
+            original = b'original launcher'
+            legacy.write_bytes(original)
+            BUILD.install_launchers(root, backups)
+            renamed = root / 'inject-sixbox-offline.bat'
+            self.assertIn('SixBoxx64ReleaseFreetypeAVX2.dll', renamed.read_text())
+            self.assertIn('inject-sixbox-offline.bat', legacy.read_text())
+            self.assertEqual(len(list(backups.glob('*.bat'))), 1)
+            self.assertEqual(next(backups.glob('*.bat')).read_bytes(), original)
+            BUILD.install_launchers(root, backups)
+            self.assertEqual(len(list(backups.glob('*.bat'))), 1)
+            self.assertEqual(list(root.glob('.sixbox-launcher-*')), [])
+
+    def test_failed_launcher_replace_keeps_existing_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy = root / 'inject-amalgam-offline.bat'
+            legacy.write_bytes(b'original')
+            with patch.object(BUILD.os, 'replace', side_effect=PermissionError('test')):
+                with self.assertRaises(PermissionError):
+                    BUILD.install_launchers(root, root / 'backups')
+            self.assertEqual(legacy.read_bytes(), b'original')
+            self.assertEqual(list(root.glob('.sixbox-launcher-*')), [])
 
     def test_rejected_or_failed_install_preserves_previous_dll(self):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):

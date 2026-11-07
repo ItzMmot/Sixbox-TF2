@@ -18,7 +18,7 @@ mono_crash.*
 
 # Build results
 [Dd]ebug/
-!Unibox/src/Features/Debug/
+!SixBox/src/Features/Debug/
 research/
 [Dd]ebugPublic/
 [Rr]elease/
@@ -376,8 +376,8 @@ bins/
 source-sdk-2013-master/
 
 # OYU AINT GETTIN THAT FAGWERETF2 AND REALIUTYOHOOKZ
-Unibox/src/Features/Misc/ProfileStalker/ProfileStalker.cpp
-Unibox/src/Features/Misc/ProfileStalker/ProfileStalker.h
+SixBox/src/Features/Misc/ProfileStalker/ProfileStalker.cpp
+SixBox/src/Features/Misc/ProfileStalker/ProfileStalker.h
 # menu ui pack
 MenuUI.zip
 
@@ -393,3 +393,12 @@ MenuUI.zip
 
 # Local Atlas reference snapshot
 /Atlas-TF2-main/
+
+# Accidental shell output and OS/editor cache files
+$null
+nul
+NUL
+.DS_Store
+Thumbs.db
+Desktop.ini
+.pytest_cache/

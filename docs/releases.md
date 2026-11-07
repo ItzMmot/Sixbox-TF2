@@ -15,7 +15,7 @@ requests or ordinary branch pushes. The existing MSBuild CI remains separate.
 
 ## Assets
 
-- `Sixboxx64ReleaseFreetypeAVX2.dll`: GUI build, MSVC ReleaseAVX2, x64, `/MD`.
+- `SixBoxx64ReleaseFreetypeAVX2.dll`: GUI build, MSVC ReleaseAVX2, x64, `/MD`.
 - Matching `.pdb` symbols.
 - `Third-party-licenses.zip`.
 - `SHA256SUMS.txt` for the preceding files.
@@ -31,7 +31,7 @@ dependencies are disabled. Dear ImGui's FreeType backend is pinned to `v1.92.7`,
 matching the bundled headers; the script rejects mismatched versions. Update the
 backend pin when updating bundled ImGui.
 
-`Unibox/FreeType.props` is imported only when `UseFreeType=true`. It adds the
+`SixBox/FreeType.props` is imported only when `UseFreeType=true`. It adds the
 backend source, includes, static library and `IMGUI_ENABLE_FREETYPE` definition.
 Existing build configurations retain their current default rasterizer. The font
 expansion/glow adapter supports both stb and FreeType while preserving the

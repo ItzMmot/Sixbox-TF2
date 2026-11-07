@@ -10,9 +10,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include "../Unibox/src/Features/Visuals/Aura/AuraBytecode.h"
-#include "../Unibox/src/Features/Visuals/Aura/AuraTexture.h"
-#include "../Unibox/src/Features/Visuals/Aura/AuraPolicy.h"
+#include "../SixBox/src/Features/Visuals/Aura/AuraBytecode.h"
+#include "../SixBox/src/Features/Visuals/Aura/AuraTexture.h"
+#include "../SixBox/src/Features/Visuals/Aura/AuraPolicy.h"
 constexpr int W=640,H=400;
 IDirect3DDevice9* dev=nullptr;
 IDirect3DTexture9 *mask=nullptr,*base=nullptr,*result=nullptr,*blur[2]{};

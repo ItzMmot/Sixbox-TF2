@@ -1,8 +1,8 @@
 // tests/auto_trolldier_test.cpp — portable regression tests for Trolldier::Solver.
 // g++ -std=c++20 -O2 -Wall -Wextra -pedantic tests/auto_trolldier_test.cpp -o /tmp/auto-trolldier-test
-#include "../Unibox/src/Features/Aimbot/AutoTrolldier/Intercept.h"
-#include "../Unibox/src/Features/Aimbot/AutoTrolldier/Rotation.h"
-#include "../Unibox/src/Features/Aimbot/AutoTrolldier/Automation.h"
+#include "../SixBox/src/Features/Aimbot/AutoTrolldier/Intercept.h"
+#include "../SixBox/src/Features/Aimbot/AutoTrolldier/Rotation.h"
+#include "../SixBox/src/Features/Aimbot/AutoTrolldier/Automation.h"
 #include <cassert>
 #include <chrono>
 #include <cstdio>

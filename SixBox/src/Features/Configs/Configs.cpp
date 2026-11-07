@@ -1,0 +1,1540 @@
+#include "ConfigMigration.h"
+#include "Configs.h"
+
+#include "../Binds/Binds.h"
+#include "../Players/PlayerUtils.h"
+#include "../Visuals/Groups/Groups.h"
+#include "../Visuals/Materials/Materials.h"
+#include "../Visuals/SkinChanger/SkinChanger.h"
+
+#include <cctype>
+#include <format>
+#include <functional>
+#include <fstream>
+
+static bool IsSafeConfigName(const std::string& sConfigName)
+{
+	if (sConfigName.empty() || sConfigName == "." || sConfigName == ".." || sConfigName.size() > 128)
+		return false;
+
+	for (unsigned char c : sConfigName)
+	{
+		if (c < 32 || c == '<' || c == '>' || c == ':' || c == '"' || c == '/' || c == '\\' || c == '|' || c == '?' || c == '*')
+			return false;
+	}
+	if (sConfigName.back() == '.' || sConfigName.back() == ' ')
+		return false;
+
+	std::string sDevice = sConfigName.substr(0, sConfigName.find('.'));
+	for (char& c : sDevice)
+		c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+	if (sDevice == "CON" || sDevice == "PRN" || sDevice == "AUX" || sDevice == "NUL")
+		return false;
+	if (sDevice.size() == 4 && (sDevice.starts_with("COM") || sDevice.starts_with("LPT")) && sDevice.back() >= '1' && sDevice.back() <= '9')
+		return false;
+
+	return std::filesystem::path(sConfigName).filename() == sConfigName;
+}
+
+static std::filesystem::path GetConfigFilePath(const std::string& sDirectory, const std::string& sConfigName, const std::string& sExtension)
+{
+	if (!IsSafeConfigName(sConfigName))
+		return {};
+
+	std::filesystem::path tDirectory = std::filesystem::path(sDirectory).lexically_normal();
+	if (!tDirectory.empty() && tDirectory.filename().empty() && tDirectory != tDirectory.root_path())
+		tDirectory = tDirectory.parent_path();
+
+	const std::filesystem::path tPath = (tDirectory / (sConfigName + sExtension)).lexically_normal();
+	return tPath.parent_path() == tDirectory ? tPath : std::filesystem::path{};
+}
+
+using ConfigMapRestore = std::vector<std::function<void()>>;
+
+static void WriteJson(const std::filesystem::path& tPath, const boost::property_tree::ptree& tTree)
+{
+	std::filesystem::path tTemp = tPath;
+	tTemp += ".tmp";
+
+	boost::property_tree::write_json(tTemp.string(), tTree);
+	if (!std::filesystem::exists(tTemp))
+		throw std::runtime_error("Config was not written");
+
+	std::error_code tError;
+	std::filesystem::rename(tTemp, tPath, tError);
+	if (tError)
+	{
+		std::filesystem::remove(tPath, tError);
+		tError.clear();
+		std::filesystem::rename(tTemp, tPath, tError);
+		if (tError)
+		{
+			std::filesystem::remove(tTemp);
+			throw std::filesystem::filesystem_error("Config replace failed", tTemp, tPath, tError);
+		}
+	}
+}
+
+struct LoadingScope_t
+{
+	std::atomic_bool& m_bLoading;
+	explicit LoadingScope_t(std::atomic_bool& bLoading) : m_bLoading(bLoading) { m_bLoading = true; }
+	~LoadingScope_t() { m_bLoading = false; }
+};
+
+static ConfigMapRestore CaptureConfigMaps()
+{
+	ConfigMapRestore vRestore;
+	for (BaseVar* pBase : G::Vars)
+	{
+#define Capture(t) if (pBase->m_iType == typeid(t).hash_code()) { auto pVar = pBase->As<t>(); auto tMap = pVar->Map; vRestore.emplace_back([pVar, tMap = std::move(tMap)]() mutable { pVar->Map = std::move(tMap); }); }
+		Capture(bool)
+		else Capture(int)
+		else Capture(float)
+		else Capture(IntRange_t)
+		else Capture(FloatRange_t)
+		else Capture(std::string)
+		else Capture(VA_LIST(std::vector<std::pair<std::string, ChamsMaterial_t>>))
+		else Capture(Color_t)
+		else Capture(Gradient_t)
+		else Capture(DragBox_t)
+		else Capture(WindowBox_t)
+#undef Capture
+	}
+	return vRestore;
+}
+
+static void SaveSkinChanger(boost::property_tree::ptree& tWrite)
+{
+	boost::property_tree::ptree tSub;
+	for (const auto& [iDef, tSkin] : F::SkinChanger.GetSkins())
+	{
+		if (tSkin.Empty())
+			continue;
+
+		boost::property_tree::ptree tChild;
+		F::Configs.SaveJson(tChild, "PaintKit", tSkin.iPaintKit);
+		F::Configs.SaveJson(tChild, "Wear", tSkin.iWear);
+		F::Configs.SaveJson(tChild, "Quality", tSkin.iQuality);
+		F::Configs.SaveJson(tChild, "Australium", tSkin.bAustralium);
+		F::Configs.SaveJson(tChild, "Festive", tSkin.bFestive);
+		F::Configs.SaveJson(tChild, "Killstreak", tSkin.iKillstreak);
+		F::Configs.SaveJson(tChild, "Sheen", tSkin.iSheen);
+		F::Configs.SaveJson(tChild, "Unusual", tSkin.iUnusual);
+		F::Configs.SaveJson(tChild, "KillEffect", tSkin.iKillEffect);
+		F::Configs.SaveJson(tChild, "PaintColor", tSkin.iPaintColor);
+		F::Configs.SaveJson(tChild, "Seed", tSkin.iSeed);
+		F::Configs.SaveJson(tChild, "Botkiller", tSkin.iBotkiller);
+		F::Configs.SaveJson(tChild, "StatTrak", tSkin.iStatTrak);
+		tSub.put_child(std::to_string(iDef), tChild);
+	}
+	{
+		boost::property_tree::ptree tBackpack;
+		for (const auto& tItem : F::SkinChanger.GetBackpack())
+		{
+			boost::property_tree::ptree tChild;
+			tChild.put("Def", tItem.iDef);
+			tChild.put("Style", tItem.iStyle);
+			if (tItem.iUnusual > 0)
+				tChild.put("Unusual", tItem.iUnusual);
+			if (tItem.iPaintColor >= 0)
+				tChild.put("PaintColor", tItem.iPaintColor);
+			if (tItem.iPaintColor2 >= 0)
+				tChild.put("PaintColor2", tItem.iPaintColor2);
+			tBackpack.put_child(std::to_string(tItem.uSerial), tChild);
+		}
+		tSub.put_child("Backpack", tBackpack);
+
+		boost::property_tree::ptree tLoadout;
+		for (const auto& [iIndex, uItemID] : F::SkinChanger.GetLoadout())
+			tLoadout.put(std::to_string(iIndex), std::to_string(uItemID));
+		tSub.put_child("Loadout", tLoadout);
+	}
+	tWrite.put_child("SkinChanger", tSub);
+}
+
+static void LoadSkinChanger(const boost::property_tree::ptree& tRead)
+{
+	std::unordered_map<int, Skin_t> mSkins;
+	std::vector<BackpackItem_t> vBackpack;
+	std::map<int, uint64_t> mLoadout;
+	if (auto tSub = tRead.get_child_optional("SkinChanger"))
+	{
+		for (const auto& tPair : *tSub)
+		{
+			int iDef = 0;
+			try { iDef = std::stoi(tPair.first); }
+			catch (...) { continue; }
+			if (iDef < 0)
+				continue;
+
+			Skin_t tSkin;
+			F::Configs.LoadJson(tPair.second, "PaintKit", tSkin.iPaintKit);
+			F::Configs.LoadJson(tPair.second, "Wear", tSkin.iWear);
+			F::Configs.LoadJson(tPair.second, "Quality", tSkin.iQuality);
+			F::Configs.LoadJson(tPair.second, "Australium", tSkin.bAustralium);
+			F::Configs.LoadJson(tPair.second, "Festive", tSkin.bFestive);
+			F::Configs.LoadJson(tPair.second, "Killstreak", tSkin.iKillstreak);
+			F::Configs.LoadJson(tPair.second, "Sheen", tSkin.iSheen);
+			F::Configs.LoadJson(tPair.second, "Unusual", tSkin.iUnusual);
+			F::Configs.LoadJson(tPair.second, "KillEffect", tSkin.iKillEffect);
+			F::Configs.LoadJson(tPair.second, "PaintColor", tSkin.iPaintColor);
+			F::Configs.LoadJson(tPair.second, "Seed", tSkin.iSeed);
+			F::Configs.LoadJson(tPair.second, "Botkiller", tSkin.iBotkiller);
+			F::Configs.LoadJson(tPair.second, "StatTrak", tSkin.iStatTrak);
+			if (!tSkin.Empty())
+				mSkins[CSkinChanger::Key(iDef)] = tSkin;
+		}
+
+		if (auto tBackpackRead = tSub->get_child_optional("Backpack"))
+		{
+			for (const auto& tPair : *tBackpackRead)
+			{
+				try
+				{
+					const int iKey = std::stoi(tPair.first);
+					const int iUnusual = std::max(tPair.second.get<int>("Unusual", 0), 0);
+					const int iPaintColor = std::clamp(tPair.second.get<int>("PaintColor", -1), -1, 0xFFFFFF);
+					const int iPaintColor2 = std::clamp(tPair.second.get<int>("PaintColor2", -1), -1, 0xFFFFFF);
+					const int iStyle = std::clamp(tPair.second.get<int>("Style", 0), 0, 255);
+					if (const int iDef = tPair.second.get<int>("Def", 0); iDef > 0 && iDef <= 0xFFFF && iKey > 0)
+						vBackpack.push_back({ uint32_t(iKey), uint16_t(iDef), iUnusual, iPaintColor, iPaintColor2, iStyle });
+					else if (iKey > 0 && iKey <= 0xFFFF)
+					{
+						uint32_t uSerial = 1;
+						while (std::any_of(vBackpack.begin(), vBackpack.end(), [uSerial](const BackpackItem_t& tItem) { return tItem.uSerial == uSerial; }))
+							uSerial++;
+						vBackpack.push_back({ uSerial, uint16_t(iKey), iUnusual, iPaintColor, iPaintColor2, iStyle });
+					}
+				}
+				catch (...) {}
+			}
+		}
+
+		if (auto tLoadoutRead = tSub->get_child_optional("Loadout"))
+		{
+			for (const auto& tPair : *tLoadoutRead)
+			{
+				try
+				{
+					mLoadout[std::stoi(tPair.first)] = std::stoull(tPair.second.data());
+				}
+				catch (...) {}
+			}
+		}
+	}
+	F::SkinChanger.SetBackpack(std::move(vBackpack));
+	F::SkinChanger.SetLoadout(std::move(mLoadout));
+	F::SkinChanger.SetSkins(std::move(mSkins));
+}
+
+template <class T> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const T& v)
+{
+	t.put(s, v);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const IntRange_t& v)
+{
+	boost::property_tree::ptree tChild;
+	SaveJson(tChild, "Min", v.Min);
+	SaveJson(tChild, "Max", v.Max);
+
+	t.put_child(s, tChild);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const FloatRange_t& v)
+{
+	boost::property_tree::ptree tChild;
+	SaveJson(tChild, "Min", v.Min);
+	SaveJson(tChild, "Max", v.Max);
+
+	t.put_child(s, tChild);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const Color_t& v)
+{
+	boost::property_tree::ptree tChild;
+	SaveJson(tChild, "r", v.r);
+	SaveJson(tChild, "g", v.g);
+	SaveJson(tChild, "b", v.b);
+	SaveJson(tChild, "a", v.a);
+
+	t.put_child(s, tChild);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const std::vector<std::pair<std::string, ChamsMaterial_t>>& v)
+{
+	boost::property_tree::ptree tChild;
+	for (auto& [sName, tMaterial] : v)
+	{
+		boost::property_tree::ptree tLayer;
+		SaveJson(tLayer, "Material", sName);
+		SaveJson(tLayer, "Color", tMaterial.tColor);
+		SaveJson(tLayer, "Start", tMaterial.flStart);
+		SaveJson(tLayer, "End", tMaterial.flEnd);
+		SaveJson(tLayer, "SmoothAlpha", tMaterial.bSmoothAlpha);
+
+		tChild.push_back({ "", tLayer });
+	}
+
+	t.put_child(s, tChild);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const std::vector<int>& v)
+{
+	boost::property_tree::ptree tChild;
+	for (int iValue : v)
+	{
+		boost::property_tree::ptree tValue;
+		tValue.put("", iValue);
+		tChild.push_back({ "", tValue });
+	}
+
+	t.put_child(s, tChild);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const Gradient_t& v)
+{
+	boost::property_tree::ptree tChild;
+	SaveJson(tChild, "StartColor", v.StartColor);
+	SaveJson(tChild, "EndColor", v.EndColor);
+
+	t.put_child(s, tChild);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const DragBox_t& v)
+{
+	boost::property_tree::ptree tChild;
+	SaveJson(tChild, "x", v.x);
+	SaveJson(tChild, "y", v.y);
+
+	t.put_child(s, tChild);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const WindowBox_t& v)
+{
+	boost::property_tree::ptree tChild;
+	SaveJson(tChild, "x", v.x);
+	SaveJson(tChild, "y", v.y);
+	SaveJson(tChild, "w", v.w);
+	SaveJson(tChild, "h", v.h);
+
+	t.put_child(s, tChild);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const Chams_t& v)
+{
+	boost::property_tree::ptree tChild;
+	SaveJson(tChild, "Visible", v.Visible);
+	SaveJson(tChild, "Occluded", v.Occluded);
+
+	t.put_child(s, tChild);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const Glow_t& v)
+{
+	boost::property_tree::ptree tChild;
+	SaveJson(tChild, "Stencil", v.Stencil);
+	SaveJson(tChild, "Blur", v.Blur);
+	SaveJson(tChild, "Start", v.Start);
+	SaveJson(tChild, "End", v.End);
+	SaveJson(tChild, "SmoothAlpha", v.SmoothAlpha);
+
+	t.put_child(s, tChild);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const Aura_t& v)
+{
+    boost::property_tree::ptree child;
+    SaveJson(child,"Enabled",v.Enabled);
+    SaveJson(child,"Mode",v.Mode);
+    SaveJson(child,"ModeCatalog",Aura::CatalogVersion);
+    SaveJson(child,"Quality",v.Quality);
+    SaveJson(child,"Coverage",v.Coverage);
+    SaveJson(child,"Additive",v.Additive);
+    SaveJson(child,"GroupColor",v.GroupColor);
+    SaveJson(child,"PresetColors",v.PresetColors);
+    SaveJson(child,"VisibleOnly",v.VisibleOnly);
+
+    SaveJson(child,"Core",v.Core);
+    SaveJson(child,"Edge",v.Edge);
+#define AURA_SAVE(n,l,d,lo,hi,step) SaveJson(child,#n,v.n);
+    AURA_FLOAT_SETTINGS(AURA_SAVE)
+#undef AURA_SAVE
+    t.put_child(s,child);
+}
+
+template <> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const ESP_t& v)
+{
+	boost::property_tree::ptree tChild;
+	SaveJson(tChild, "Draw", v.Draw);
+	SaveJson(tChild, "BoxStyle", v.BoxStyle);
+	SaveJson(tChild, "BackgroundOpacity", v.BackgroundOpacity);
+	SaveJson(tChild, "Start", v.Start);
+	SaveJson(tChild, "End", v.End);
+	SaveJson(tChild, "SmoothAlpha", v.SmoothAlpha);
+
+	t.put_child(s, tChild);
+}
+
+
+
+template <class T> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, T& v)
+{
+	if (auto o = t.get_optional<T>(s))
+		v = *o;
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, IntRange_t& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		LoadJson(*tChild, "Min", v.Min);
+		LoadJson(*tChild, "Max", v.Max);
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, FloatRange_t& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		LoadJson(*tChild, "Min", v.Min);
+		LoadJson(*tChild, "Max", v.Max);
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, Color_t& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		LoadJson(*tChild, "r", v.r);
+		LoadJson(*tChild, "g", v.g);
+		LoadJson(*tChild, "b", v.b);
+		LoadJson(*tChild, "a", v.a);
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, std::vector<std::pair<std::string, ChamsMaterial_t>>& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		v.clear();
+		for (auto& tLayer : *tChild | std::views::values)
+		{
+			if (auto o = tLayer.get_optional<std::string>("Material"))
+			{
+				std::string& m = *o;
+				Color_t c; LoadJson(tLayer, "Color", c);
+				float flStart = 0.f; LoadJson(tLayer, "Start", flStart);
+				float flEnd = 8192.f; LoadJson(tLayer, "End", flEnd);
+				bool bSmoothAlpha = false; LoadJson(tLayer, "SmoothAlpha", bSmoothAlpha);
+				v.emplace_back(m, ChamsMaterial_t{ c, flStart, flEnd, bSmoothAlpha});
+			}
+		}
+	}
+
+	// remove invalid/duplicate materials
+	for (auto it = v.begin(); it != v.end();)
+	{
+		auto uHash = FNV1A::Hash32(it->first.c_str());
+		bool bValid = uHash != FNV1A::Hash32Const("None")
+			&& (!F::Materials.m_bLoaded || uHash == FNV1A::Hash32Const("Original") || F::Materials.m_mMaterials.contains(uHash));
+		if (bValid)
+		{
+			int i = 0; for (auto& s : v | std::views::keys)
+			{
+				auto uHash2 = FNV1A::Hash32(s.c_str());
+				if (uHash == uHash2)
+					i++;
+			}
+			bValid = i <= 1;
+		}
+
+		if (bValid)
+			++it;
+		else
+			it = v.erase(it);
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, std::vector<int>& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		v.clear();
+		for (auto& tValue : *tChild | std::views::values)
+			v.push_back(tValue.get_value<int>());
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, Gradient_t& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		LoadJson(*tChild, "StartColor", v.StartColor);
+		LoadJson(*tChild, "EndColor", v.EndColor);
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, DragBox_t& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		LoadJson(*tChild, "x", v.x);
+		LoadJson(*tChild, "y", v.y);
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, WindowBox_t& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		LoadJson(*tChild, "x", v.x);
+		LoadJson(*tChild, "y", v.y);
+		LoadJson(*tChild, "w", v.w);
+		LoadJson(*tChild, "h", v.h);
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, Chams_t& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		LoadJson(*tChild, "Visible", v.Visible);
+		LoadJson(*tChild, "Occluded", v.Occluded);
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, Glow_t& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		LoadJson(*tChild, "Stencil", v.Stencil);
+		LoadJson(*tChild, "Blur", v.Blur);
+		LoadJson(*tChild, "Start", v.Start);
+		LoadJson(*tChild, "End", v.End);
+		LoadJson(*tChild, "SmoothAlpha", v.SmoothAlpha);
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, Aura_t& v)
+{
+    if(auto child=t.get_child_optional(s))
+    {
+        LoadJson(*child,"Enabled",v.Enabled);
+        LoadJson(*child,"Mode",v.Mode);
+        LoadJson(*child,"Quality",v.Quality);
+        LoadJson(*child,"Coverage",v.Coverage);
+        LoadJson(*child,"Additive",v.Additive);
+        LoadJson(*child,"GroupColor",v.GroupColor);
+        LoadJson(*child,"PresetColors",v.PresetColors);
+        LoadJson(*child,"VisibleOnly",v.VisibleOnly);
+
+        LoadJson(*child,"Core",v.Core);
+        LoadJson(*child,"Edge",v.Edge);
+#define AURA_LOAD(n,l,d,lo,hi,step) LoadJson(*child,#n,v.n);
+        AURA_FLOAT_SETTINGS(AURA_LOAD)
+#undef AURA_LOAD
+        int catalog=1;
+        LoadJson(*child,"ModeCatalog",catalog);
+        v.Mode=Aura::UpgradeMode(v.Mode,catalog);
+        v.Sanitize();
+    }
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s,ESP_t& v)
+{
+	if (auto tChild = t.get_child_optional(s))
+	{
+		LoadJson(*tChild, "Draw", v.Draw);
+		LoadJson(*tChild, "BoxStyle", v.BoxStyle);
+		v.BoxStyle = std::clamp(v.BoxStyle, 0, 4);
+		LoadJson(*tChild, "BackgroundOpacity", v.BackgroundOpacity);
+		LoadJson(*tChild, "Start", v.Start);
+		LoadJson(*tChild, "End", v.End);
+		LoadJson(*tChild, "SmoothAlpha", v.SmoothAlpha);
+	}
+}
+
+
+
+template <class T> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, ConfigVar<T>* c, int i)
+{
+	LoadJson(t, s, c->Map[i]);
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, ConfigVar<int>* c, int i)
+{
+	auto& v = c->Map[i];
+	LoadJson(t, s, v);
+
+	if (!c->m_vValues.empty())
+	{
+		if (c->m_iFlags & DROPDOWN_NOSANITIZATION)
+			return;
+
+		if (!(c->m_iFlags & DROPDOWN_MULTI))
+			v = std::clamp(v, 0, int(c->m_vValues.size() - 1));
+		else
+		{
+			unsigned int uValue = static_cast<unsigned int>(v);
+			for (int i = 0; i < MAX_GROUPS; i++)
+			{
+				const unsigned int uBit = 1u << i;
+				bool bFound = uValue & uBit && static_cast<size_t>(i) < c->m_vValues.size();
+				if (!bFound)
+					uValue &= ~uBit;
+			}
+			v = static_cast<int>(uValue);
+		}
+	}
+	else if (c->m_sExtra)
+	{
+		if (!(c->m_iFlags & SLIDER_PRECISION))
+			v = float(v) - fnmodf(float(v) - c->m_unStep.i / 2.f, c->m_unStep.i) + c->m_unStep.i / 2.f;
+		if (c->m_iFlags & SLIDER_CLAMP)
+			v = std::clamp(v, c->m_unMin.i, c->m_unMax.i);
+		else if (c->m_iFlags & SLIDER_MIN)
+			v = std::max(v, c->m_unMin.i);
+		else if (c->m_iFlags & SLIDER_MAX)
+			v = std::min(v, c->m_unMax.i);
+	}
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, ConfigVar<float>* c, int i)
+{
+	auto& v = c->Map[i];
+	LoadJson(t, s, v);
+
+	if (!(c->m_iFlags & SLIDER_PRECISION))
+		v = v - fnmodf(v - c->m_unStep.f / 2, c->m_unStep.f) + c->m_unStep.f / 2;
+	if (c->m_iFlags & SLIDER_CLAMP)
+		v = std::clamp(v, c->m_unMin.f, c->m_unMax.f);
+	else if (c->m_iFlags & SLIDER_MIN)
+		v = std::max(v, c->m_unMin.f);
+	else if (c->m_iFlags & SLIDER_MAX)
+		v = std::min(v, c->m_unMax.f);
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, ConfigVar<IntRange_t>* c, int i)
+{
+	auto& v = c->Map[i];
+	LoadJson(t, s, v);
+
+	if (!(c->m_iFlags & SLIDER_PRECISION))
+	{
+		v.Min = float(v.Min) - fnmodf(float(v.Min) - c->m_unStep.i / 2.f, c->m_unStep.i) + c->m_unStep.i / 2.f;
+		v.Max = float(v.Max) - fnmodf(float(v.Max) - c->m_unStep.i / 2.f, c->m_unStep.i) + c->m_unStep.i / 2.f;
+	}
+	if (c->m_iFlags & SLIDER_CLAMP)
+	{
+		v.Min = std::clamp(v.Min, c->m_unMin.i, c->m_unMax.i - c->m_unStep.i);
+		v.Max = std::clamp(v.Max, c->m_unMin.i + c->m_unStep.i, c->m_unMax.i);
+	}
+	else if (c->m_iFlags & SLIDER_MIN)
+	{
+		v.Min = std::max(v.Min, c->m_unMin.i);
+		v.Max = std::max(v.Max, c->m_unMin.i + c->m_unStep.i);
+	}
+	else if (c->m_iFlags & SLIDER_MAX)
+	{
+		v.Min = std::min(v.Min, c->m_unMax.i - c->m_unStep.i);
+		v.Max = std::min(v.Max, c->m_unMax.i);
+	}
+	v.Max = std::max(v.Max, v.Min + c->m_unStep.i);
+}
+
+template <> void CConfigs::LoadJson(const boost::property_tree::ptree& t, const std::string& s, ConfigVar<FloatRange_t>* c, int i)
+{
+	auto& v = c->Map[i];
+	LoadJson(t, s, v);
+
+	if (!(c->m_iFlags & SLIDER_PRECISION))
+	{
+		v.Min = v.Min - fnmodf(v.Min - c->m_unStep.f / 2, c->m_unStep.f) + c->m_unStep.f / 2;
+		v.Max = v.Max - fnmodf(v.Max - c->m_unStep.f / 2, c->m_unStep.f) + c->m_unStep.f / 2;
+	}
+	if (c->m_iFlags & SLIDER_CLAMP)
+	{
+		v.Min = std::clamp(v.Min, c->m_unMin.f, c->m_unMax.f - c->m_unStep.f);
+		v.Max = std::clamp(v.Max, c->m_unMin.f + c->m_unStep.f, c->m_unMax.f);
+	}
+	else if (c->m_iFlags & SLIDER_MIN)
+	{
+		v.Min = std::max(v.Min, c->m_unMin.f);
+		v.Max = std::max(v.Max, c->m_unMin.f + c->m_unStep.f);
+	}
+	else if (c->m_iFlags & SLIDER_MAX)
+	{
+		v.Min = std::min(v.Min, c->m_unMax.f - c->m_unStep.f);
+		v.Max = std::min(v.Max, c->m_unMax.f);
+	}
+	v.Max = std::max(v.Max, v.Min + c->m_unStep.f);
+}
+
+
+
+static void MigrateBrandLabels()
+{
+    auto migrate=[](ConfigVar<std::string>& variable,bool tag) {
+        const char* replacement=tag?SixBoxIdentity::Tag:SixBoxIdentity::Name;
+        for(auto& [bind,value]:variable.Map)
+            if(SixBoxIdentity::IsLegacyLabel(value,tag)) value=replacement;
+        if(SixBoxIdentity::IsLegacyLabel(variable.Value,tag)) variable.Value=replacement;
+    };
+    migrate(Vars::Menu::CheatTitle,false);migrate(Vars::Menu::CheatTag,true);
+}
+
+CConfigs::CConfigs()
+{
+	m_sConfigPath = SixBoxIdentity::DataRoot(std::filesystem::current_path()).string() + "\\";
+	m_sVisualsPath = m_sConfigPath + "Visuals\\";
+	m_sSkinsPath = m_sConfigPath + "Skins\\";
+	m_sCorePath = m_sConfigPath + "Core\\";
+	m_sMaterialsPath = m_sConfigPath + "Materials\\";
+	m_sStatePath = m_sConfigPath + "active.cfg";
+
+	if (!std::filesystem::exists(m_sConfigPath))
+		std::filesystem::create_directory(m_sConfigPath);
+
+	if (!std::filesystem::exists(m_sVisualsPath))
+		std::filesystem::create_directory(m_sVisualsPath);
+
+		if (!std::filesystem::exists(m_sSkinsPath))
+			std::filesystem::create_directory(m_sSkinsPath);
+
+	if (!std::filesystem::exists(m_sCorePath))
+		std::filesystem::create_directory(m_sCorePath);
+
+	if (!std::filesystem::exists(m_sMaterialsPath))
+		std::filesystem::create_directory(m_sMaterialsPath);
+
+	LoadState();
+}
+
+void CConfigs::LoadState()
+{
+	try
+	{
+		if (!std::filesystem::exists(m_sStatePath))
+			return;
+
+		boost::property_tree::ptree tRead;
+		read_json(m_sStatePath, tRead);
+		const std::string sConfig = tRead.get("Config", m_sCurrentConfig);
+		const std::string sVisuals = tRead.get("Visuals", m_sCurrentVisuals);
+		const std::string sSkins = tRead.get("Skins", m_sCurrentSkins);
+		if (IsSafeConfigName(sConfig))
+			m_sCurrentConfig = sConfig;
+		if (IsSafeConfigName(sVisuals))
+			m_sCurrentVisuals = sVisuals;
+			if (IsSafeConfigName(sSkins))
+				m_sCurrentSkins = sSkins;
+	}
+	catch (...) {}
+}
+
+void CConfigs::SaveState() const
+{
+	try
+	{
+		boost::property_tree::ptree tWrite;
+		tWrite.put("Config", m_sCurrentConfig);
+		tWrite.put("Skins", m_sCurrentSkins);
+		tWrite.put("Visuals", m_sCurrentVisuals);
+		WriteJson(m_sStatePath, tWrite);
+	}
+	catch (...) {}
+}
+
+#define IsType(t) pBase->m_iType == typeid(t).hash_code()
+
+template <class T>
+static inline void SaveMain(BaseVar*& pBase, boost::property_tree::ptree& tTree)
+{
+	auto pVar = pBase->As<T>();
+
+	boost::property_tree::ptree tMap;
+	for (auto& [iBind, tValue] : pVar->Map)
+		F::Configs.SaveJson(tMap, std::to_string(iBind), tValue);
+	tTree.put_child(pVar->Name(), tMap);
+}
+#define Save(t, j) if (IsType(t)) SaveMain<t>(pBase, j);
+
+template <class T>
+static inline void LoadMain(BaseVar*& pBase, boost::property_tree::ptree& tTree)
+{
+	auto pVar = pBase->As<T>();
+
+	pVar->Map = { { DEFAULT_BIND, pVar->Default } };
+	if (auto tMap = tTree.get_child_optional(pVar->Name()))
+	{
+		for (auto& sKey : *tMap | std::views::keys)
+		{
+			int iBind = std::stoi(sKey);
+			if (iBind == DEFAULT_BIND || iBind >= 0 && F::Binds.m_vBinds.size() > iBind && !(pVar->m_iFlags & NOBIND))
+			{
+				F::Configs.LoadJson(*tMap, sKey, pVar, iBind);
+				if (iBind != DEFAULT_BIND)
+					std::next(F::Binds.m_vBinds.begin(), iBind)->m_vVars.push_back(pVar);
+			}
+		}
+	}
+	else if (!(pVar->m_iFlags & NOSAVE))
+		SDK::Output("SixBox", std::format("{} not found", pVar->Name()).c_str(), ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+}
+#define Load(t, j) if (IsType(t)) LoadMain<t>(pBase, j);
+
+bool CConfigs::SaveConfig(const std::string& sConfigName, bool bNotify)
+{
+	const std::filesystem::path tPath = GetConfigFilePath(m_sConfigPath, sConfigName, m_sConfigExtension);
+	if (tPath.empty())
+		return false;
+
+	try
+	{
+		std::scoped_lock lock(F::Binds.m_mMutex);
+		boost::property_tree::ptree tWrite;
+		{
+			boost::property_tree::ptree tSub;
+			for (int iID = 0; iID < F::Binds.m_vBinds.size(); iID++)
+			{
+				auto& tBind = F::Binds.m_vBinds[iID];
+
+				boost::property_tree::ptree tChild;
+				SaveJson(tChild, "Name", tBind.m_sName);
+				SaveJson(tChild, "Type", tBind.m_iType);
+				SaveJson(tChild, "Info", tBind.m_iInfo);
+				SaveJson(tChild, "Key", tBind.m_iKey);
+				SaveJson(tChild, "Enabled", tBind.m_bEnabled);
+				SaveJson(tChild, "Visibility", tBind.m_iVisibility);
+				SaveJson(tChild, "Not", tBind.m_bNot);
+				SaveJson(tChild, "Active", tBind.m_bActive);
+				SaveJson(tChild, "Parent", tBind.m_iParent);
+				SaveJson(tChild, "Toggled", tBind.m_bToggled);
+				SaveJson(tChild, "ClassMask", tBind.m_iClassMask);
+				SaveJson(tChild, "Surface", tBind.m_iSurface);
+				SaveJson(tChild, "Items", tBind.m_vItems);
+				SaveJson(tChild, "Collapsed", tBind.m_bCollapsed);
+
+				tSub.put_child(std::to_string(iID), tChild);
+			}
+			tWrite.put_child("Binds", tSub);
+		}
+
+		{
+			boost::property_tree::ptree tSub;
+			bool bNoSave = !Vars::Config::LoadDebugSettings.Value && !(GetAsyncKeyState(VK_SHIFT) & 0x8000);
+			for (auto& pBase : G::Vars)
+			{
+				if (bNoSave && pBase->m_iFlags & NOSAVE)
+					continue;
+
+				Save(bool, tSub)
+				else Save(int, tSub)
+				else Save(float, tSub)
+				else Save(IntRange_t, tSub)
+				else Save(FloatRange_t, tSub)
+				else Save(std::string, tSub)
+				else Save(VA_LIST(std::vector<std::pair<std::string, ChamsMaterial_t>>), tSub)
+				else Save(Color_t, tSub)
+				else Save(Gradient_t, tSub)
+				else Save(DragBox_t, tSub)
+				else Save(WindowBox_t, tSub)
+			}
+			tWrite.put_child("Vars", tSub);
+		}
+
+		{
+			boost::property_tree::ptree tSub;
+			for (int iID = 0; iID < F::Groups.m_vGroups.size() && iID < MAX_GROUPS; iID++)
+			{
+				auto& tGroup = F::Groups.m_vGroups[iID];
+
+				boost::property_tree::ptree tChild;
+				SaveJson(tChild, "Name", tGroup.m_sName);
+				SaveJson(tChild, "Color", tGroup.m_tColor);
+				SaveJson(tChild, "TagsOverrideColor", tGroup.m_bTagsOverrideColor);
+				SaveJson(tChild, "Targets", tGroup.m_iTargets);
+				SaveJson(tChild, "Conditions", tGroup.m_iConditions);
+				SaveJson(tChild, "Roles", tGroup.m_vRoles);
+				SaveJson(tChild, "Players", tGroup.m_iPlayers);
+				SaveJson(tChild, "Buildings", tGroup.m_iBuildings);
+				SaveJson(tChild, "Projectiles", tGroup.m_iProjectiles);
+				SaveJson(tChild, "ESP", tGroup.m_tESP);
+				SaveJson(tChild, "Chams", tGroup.m_tChams);
+				SaveJson(tChild, "Glow", tGroup.m_tGlow);
+                SaveJson(tChild, "Aura", tGroup.m_tAura);
+				SaveJson(tChild, "OffscreenArrows", tGroup.m_bOffscreenArrows);
+				SaveJson(tChild, "OffscreenArrowsOffset", tGroup.m_iOffscreenArrowsOffset);
+				SaveJson(tChild, "OffscreenArrowsMaxDistance", tGroup.m_flOffscreenArrowsMaxDistance);
+				SaveJson(tChild, "PickupTimer", tGroup.m_bPickupTimer);
+				SaveJson(tChild, "Backtrack", tGroup.m_iBacktrack);
+				SaveJson(tChild, "BacktrackChams", tGroup.m_tBacktrackChams);
+				SaveJson(tChild, "BacktrackGlow", tGroup.m_tBacktrackGlow);
+				SaveJson(tChild, "Trajectory", tGroup.m_iTrajectory);
+				SaveJson(tChild, "Sightlines", tGroup.m_iSightlines);
+
+				tSub.put_child(std::to_string(iID), tChild);
+			}
+			tWrite.put_child("Groups", tSub);
+		}
+
+
+		WriteJson(tPath, tWrite);
+
+		m_sCurrentConfig = sConfigName; m_sCurrentVisuals = "";
+		SaveState();
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Config {} saved", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Save config failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+		return false;
+	}
+
+	return true;
+}
+
+bool CConfigs::LoadConfig(const std::string& sConfigName, bool bNotify)
+{
+	LoadingScope_t tLoading(m_bConfigLoading);
+	SDK::CInitTimingScope tLoad("Configs.LoadConfig");
+	const std::filesystem::path tPath = GetConfigFilePath(m_sConfigPath, sConfigName, m_sConfigExtension);
+	if (tPath.empty())
+		return false;
+
+	std::vector<Bind_t> vOldBinds;
+	std::vector<Group_t> vOldGroups;
+	ConfigMapRestore vRestore;
+	const std::string sOldCurrentConfig = m_sCurrentConfig;
+	const std::string sOldCurrentVisuals = m_sCurrentVisuals;
+	bool bTransaction = false;
+	try
+	{
+		if (!std::filesystem::exists(tPath))
+		{
+			if (sConfigName == std::string("default"))
+			{
+				SaveConfig("default", false);
+				H::Fonts.Reload();
+			}
+			return false;
+		}
+		std::scoped_lock lock(F::Binds.m_mMutex);
+
+		boost::property_tree::ptree tRead;
+		read_json(tPath.string(), tRead);
+		vOldBinds = F::Binds.m_vBinds;
+		vOldGroups = F::Groups.m_vGroups;
+		vRestore = CaptureConfigMaps();
+		bTransaction = true;
+
+		F::Binds.m_vBinds.clear();
+		F::Groups.m_vGroups.clear();
+
+		if (auto tSub = tRead.get_child_optional("Binds"))
+		{
+			for (const auto& tChild : *tSub | std::views::values)
+			{
+				Bind_t tBind = {};
+				LoadJson(tChild, "Name", tBind.m_sName);
+				LoadJson(tChild, "Type", tBind.m_iType);
+				LoadJson(tChild, "Info", tBind.m_iInfo);
+				LoadJson(tChild, "Key", tBind.m_iKey);
+				LoadJson(tChild, "Enabled", tBind.m_bEnabled);
+				LoadJson(tChild, "Visibility", tBind.m_iVisibility);
+				LoadJson(tChild, "Not", tBind.m_bNot);
+				LoadJson(tChild, "Active", tBind.m_bActive);
+				LoadJson(tChild, "Parent", tBind.m_iParent);
+				tBind.m_bToggled = tBind.m_bActive; // older configs stored toggle state in "Active"
+				LoadJson(tChild, "Toggled", tBind.m_bToggled);
+				LoadJson(tChild, "ClassMask", tBind.m_iClassMask);
+				LoadJson(tChild, "Surface", tBind.m_iSurface);
+				LoadJson(tChild, "Items", tBind.m_vItems);
+				LoadJson(tChild, "Collapsed", tBind.m_bCollapsed);
+				if (tBind.m_iParent < DEFAULT_BIND)
+					tBind.m_iParent = DEFAULT_BIND;
+
+				F::Binds.m_vBinds.push_back(tBind);
+			}
+		}
+		else
+			SDK::Output("SixBox", "Config binds not found", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+
+		// Reject self-references and cycles from hand-edited/old configs before
+		// bind evaluation can recurse through the graph.
+		for (auto& tBind : F::Binds.m_vBinds)
+		{
+			if (tBind.m_iParent >= F::Binds.m_vBinds.size())
+				tBind.m_iParent = DEFAULT_BIND;
+		}
+		for (int i = 0; i < F::Binds.m_vBinds.size(); i++)
+		{
+			std::vector<bool> vSeen(F::Binds.m_vBinds.size());
+			for (int iBind = i; iBind != DEFAULT_BIND; iBind = F::Binds.m_vBinds[iBind].m_iParent)
+			{
+				if (iBind < 0 || iBind >= F::Binds.m_vBinds.size() || vSeen[iBind])
+				{
+					F::Binds.m_vBinds[i].m_iParent = DEFAULT_BIND;
+					break;
+				}
+				vSeen[iBind] = true;
+			}
+		}
+		if (auto tSub = tRead.get_child_optional("Vars");
+			tSub || (tSub = tRead.get_child_optional("ConVars")))
+		{
+			bool bNoSave = !(GetAsyncKeyState(VK_SHIFT) & 0x8000);
+			for (auto& pBase : G::Vars)
+			{
+				if (bNoSave && pBase->m_iFlags & NOSAVE)
+					continue;
+				
+				Load(bool, *tSub)
+				else Load(int, *tSub)
+				else Load(float, *tSub)
+				else Load(IntRange_t, *tSub)
+				else Load(FloatRange_t, *tSub)
+				else Load(std::string, *tSub)
+				else Load(VA_LIST(std::vector<std::pair<std::string, ChamsMaterial_t>>), *tSub)
+				else Load(Color_t, *tSub)
+				else Load(Gradient_t, *tSub)
+				else Load(DragBox_t, *tSub)
+				else Load(WindowBox_t, *tSub)
+
+				if (bNoSave && FNV1A::Hash32(pBase->Name()) == FNV1A::Hash32Const("Vars::Config::LoadDebugSettings") && pBase->As<bool>()->Map[DEFAULT_BIND])
+					bNoSave = false;
+			}
+		}
+		else
+			SDK::Output("SixBox", "Config vars not found", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+
+		if (auto tSub = tRead.get_child_optional("Groups"))
+		{
+			for (auto& tChild : *tSub | std::views::values)
+			{
+				if (F::Groups.m_vGroups.size() >= MAX_GROUPS)
+					break;
+
+				Group_t tGroup = {};
+				LoadJson(tChild, "Name", tGroup.m_sName);
+				LoadJson(tChild, "Color", tGroup.m_tColor);
+				LoadJson(tChild, "TagsOverrideColor", tGroup.m_bTagsOverrideColor);
+				LoadJson(tChild, "Targets", tGroup.m_iTargets);
+				LoadJson(tChild, "Conditions", tGroup.m_iConditions);
+				LoadJson(tChild, "Roles", tGroup.m_vRoles);
+				LoadJson(tChild, "Players", tGroup.m_iPlayers);
+				LoadJson(tChild, "Buildings", tGroup.m_iBuildings);
+				LoadJson(tChild, "Projectiles", tGroup.m_iProjectiles);
+				LoadJson(tChild, "ESP", tGroup.m_tESP);
+				LoadJson(tChild, "Chams", tGroup.m_tChams);
+				LoadJson(tChild, "Glow", tGroup.m_tGlow);
+                LoadJson(tChild, "Aura", tGroup.m_tAura);
+				LoadJson(tChild, "OffscreenArrows", tGroup.m_bOffscreenArrows);
+				LoadJson(tChild, "OffscreenArrowsOffset", tGroup.m_iOffscreenArrowsOffset);
+				LoadJson(tChild, "OffscreenArrowsMaxDistance", tGroup.m_flOffscreenArrowsMaxDistance);
+				LoadJson(tChild, "PickupTimer", tGroup.m_bPickupTimer);
+				LoadJson(tChild, "Backtrack", tGroup.m_iBacktrack);
+				LoadJson(tChild, "BacktrackChams", tGroup.m_tBacktrackChams);
+				LoadJson(tChild, "BacktrackGlow", tGroup.m_tBacktrackGlow);
+				LoadJson(tChild, "Trajectory", tGroup.m_iTrajectory);
+				LoadJson(tChild, "Sightlines", tGroup.m_iSightlines);
+
+				F::Groups.m_vGroups.push_back(tGroup);
+			}
+		}
+		else
+			SDK::Output("SixBox", "Config groups not found", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+
+
+		MigrateBrandLabels();
+		F::Binds.SetVars(nullptr, nullptr, false);
+		H::Fonts.Reload();
+
+		m_sCurrentConfig = sConfigName; m_sCurrentVisuals = "";
+		SaveState();
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Config {} loaded", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+		bTransaction = false;
+	}
+	catch (...)
+	{
+		if (bTransaction)
+		{
+			std::scoped_lock lock(F::Binds.m_mMutex);
+			F::Binds.m_vBinds = std::move(vOldBinds);
+			F::Groups.m_vGroups = std::move(vOldGroups);
+			for (auto& fRestore : vRestore)
+				fRestore();
+			m_sCurrentConfig = sOldCurrentConfig;
+			m_sCurrentVisuals = sOldCurrentVisuals;
+			F::Binds.SetVars(nullptr, nullptr, false);
+		}
+		SDK::Output("SixBox", "Load config failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+		return false;
+	}
+
+	return true;
+}
+
+template <class T>
+static inline void SaveMiscMain(BaseVar*& pBase, boost::property_tree::ptree& tTree)
+{
+	F::Configs.SaveJson(tTree, pBase->Name(), pBase->As<T>()->Map[DEFAULT_BIND]);
+}
+#define SaveMisc(t, j) if (IsType(t)) SaveMiscMain<t>(pBase, j);
+
+template <class T>
+static inline void LoadMiscMain(BaseVar*& pBase, boost::property_tree::ptree& tTree)
+{
+	F::Configs.LoadJson(tTree, pBase->Name(), pBase->As<T>(), DEFAULT_BIND);
+}
+#define LoadMisc(t, j) if (IsType(t)) LoadMiscMain<t>(pBase, j);
+
+bool CConfigs::SaveVisual(const std::string& sConfigName, bool bNotify)
+{
+	const std::filesystem::path tPath = GetConfigFilePath(m_sVisualsPath, sConfigName, m_sConfigExtension);
+	if (tPath.empty())
+		return false;
+
+	try
+	{
+		std::scoped_lock lock(F::Binds.m_mMutex);
+		boost::property_tree::ptree tWrite;
+
+		{
+			boost::property_tree::ptree tSub;
+			bool bNoSave = !(GetAsyncKeyState(VK_SHIFT) & 0x8000);
+			for (auto& pBase : G::Vars)
+			{
+				if (!(pBase->m_iFlags & VISUAL) || bNoSave && pBase->m_iFlags & NOSAVE)
+					continue;
+
+				SaveMisc(bool, tSub)
+				else SaveMisc(int, tSub)
+				else SaveMisc(float, tSub)
+				else SaveMisc(IntRange_t, tSub)
+				else SaveMisc(FloatRange_t, tSub)
+				else SaveMisc(std::string, tSub)
+				else SaveMisc(VA_LIST(std::vector<std::pair<std::string, ChamsMaterial_t>>), tSub)
+				else SaveMisc(Color_t, tSub)
+				else SaveMisc(Gradient_t, tSub)
+				else SaveMisc(DragBox_t, tSub)
+				else SaveMisc(WindowBox_t, tSub)
+			}
+			tWrite.put_child("Vars", tSub);
+		}
+
+		{
+			boost::property_tree::ptree tSub;
+			for (int iID = 0; iID < F::Groups.m_vGroups.size() && iID < MAX_GROUPS; iID++)
+			{
+				auto& tGroup = F::Groups.m_vGroups[iID];
+
+				boost::property_tree::ptree tChild;
+				SaveJson(tChild, "Name", tGroup.m_sName);
+				SaveJson(tChild, "Color", tGroup.m_tColor);
+				SaveJson(tChild, "TagsOverrideColor", tGroup.m_bTagsOverrideColor);
+				SaveJson(tChild, "Targets", tGroup.m_iTargets);
+				SaveJson(tChild, "Conditions", tGroup.m_iConditions);
+				SaveJson(tChild, "Roles", tGroup.m_vRoles);
+				SaveJson(tChild, "Players", tGroup.m_iPlayers);
+				SaveJson(tChild, "Buildings", tGroup.m_iBuildings);
+				SaveJson(tChild, "Projectiles", tGroup.m_iProjectiles);
+				SaveJson(tChild, "ESP", tGroup.m_tESP);
+				SaveJson(tChild, "Chams", tGroup.m_tChams);
+				SaveJson(tChild, "Glow", tGroup.m_tGlow);
+                SaveJson(tChild, "Aura", tGroup.m_tAura);
+				SaveJson(tChild, "OffscreenArrows", tGroup.m_bOffscreenArrows);
+				SaveJson(tChild, "OffscreenArrowsOffset", tGroup.m_iOffscreenArrowsOffset);
+				SaveJson(tChild, "OffscreenArrowsMaxDistance", tGroup.m_flOffscreenArrowsMaxDistance);
+				SaveJson(tChild, "PickupTimer", tGroup.m_bPickupTimer);
+				SaveJson(tChild, "Backtrack", tGroup.m_iBacktrack);
+				SaveJson(tChild, "BacktrackChams", tGroup.m_tBacktrackChams);
+				SaveJson(tChild, "BacktrackGlow", tGroup.m_tBacktrackGlow);
+				SaveJson(tChild, "Trajectory", tGroup.m_iTrajectory);
+				SaveJson(tChild, "Sightlines", tGroup.m_iSightlines);
+
+				tSub.put_child(std::to_string(iID), tChild);
+			}
+			tWrite.put_child("Groups", tSub);
+		}
+
+
+		WriteJson(tPath, tWrite);
+		m_sCurrentVisuals = sConfigName;
+		SaveState();
+
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Visual config {} saved", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Save visuals failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+		return false;
+	}
+	return true;
+}
+
+bool CConfigs::LoadVisual(const std::string& sConfigName, bool bNotify)
+{
+	LoadingScope_t tLoading(m_bVisualsLoading);
+	const std::filesystem::path tPath = GetConfigFilePath(m_sVisualsPath, sConfigName, m_sConfigExtension);
+	if (tPath.empty())
+		return false;
+
+	std::vector<Group_t> vOldGroups;
+	ConfigMapRestore vRestore;
+	const std::string sOldCurrentVisuals = m_sCurrentVisuals;
+	bool bTransaction = false;
+	try
+	{
+		std::scoped_lock lock(F::Binds.m_mMutex);
+		if (!std::filesystem::exists(tPath))
+			return false;
+
+		boost::property_tree::ptree tRead;
+		read_json(tPath.string(), tRead);
+		vOldGroups = F::Groups.m_vGroups;
+		vRestore = CaptureConfigMaps();
+		bTransaction = true;
+
+		F::Groups.m_vGroups.clear();
+
+		if (auto tSub = tRead.get_child_optional("Vars");
+			tSub || (tSub = tRead))
+		{
+			bool bNoSave = !(GetAsyncKeyState(VK_SHIFT) & 0x8000);
+			for (auto& pBase : G::Vars)
+			{
+				if (!(pBase->m_iFlags & VISUAL) || bNoSave && pBase->m_iFlags & NOSAVE)
+					continue;
+
+				LoadMisc(bool, *tSub)
+				else LoadMisc(int, *tSub)
+				else LoadMisc(float, *tSub)
+				else LoadMisc(IntRange_t, *tSub)
+				else LoadMisc(FloatRange_t, *tSub)
+				else LoadMisc(std::string, *tSub)
+				else LoadMisc(VA_LIST(std::vector<std::pair<std::string, ChamsMaterial_t>>), *tSub)
+				else LoadMisc(Color_t, *tSub)
+				else LoadMisc(Gradient_t, *tSub)
+				else LoadMisc(DragBox_t, *tSub)
+				else LoadMisc(WindowBox_t, *tSub)
+			}
+		}
+		else
+			SDK::Output("SixBox", "Config vars not found", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+
+		if (auto tSub = tRead.get_child_optional("Groups"))
+		{
+			for (auto& tChild : *tSub | std::views::values)
+			{
+				if (F::Groups.m_vGroups.size() >= MAX_GROUPS)
+					break;
+
+				Group_t tGroup = {};
+				LoadJson(tChild, "Name", tGroup.m_sName);
+				LoadJson(tChild, "Color", tGroup.m_tColor);
+				LoadJson(tChild, "TagsOverrideColor", tGroup.m_bTagsOverrideColor);
+				LoadJson(tChild, "Targets", tGroup.m_iTargets);
+				LoadJson(tChild, "Conditions", tGroup.m_iConditions);
+				LoadJson(tChild, "Roles", tGroup.m_vRoles);
+				LoadJson(tChild, "Players", tGroup.m_iPlayers);
+				LoadJson(tChild, "Buildings", tGroup.m_iBuildings);
+				LoadJson(tChild, "Projectiles", tGroup.m_iProjectiles);
+				LoadJson(tChild, "ESP", tGroup.m_tESP);
+				LoadJson(tChild, "Chams", tGroup.m_tChams);
+				LoadJson(tChild, "Glow", tGroup.m_tGlow);
+                LoadJson(tChild, "Aura", tGroup.m_tAura);
+				LoadJson(tChild, "OffscreenArrows", tGroup.m_bOffscreenArrows);
+				LoadJson(tChild, "OffscreenArrowsOffset", tGroup.m_iOffscreenArrowsOffset);
+				LoadJson(tChild, "OffscreenArrowsMaxDistance", tGroup.m_flOffscreenArrowsMaxDistance);
+				LoadJson(tChild, "PickupTimer", tGroup.m_bPickupTimer);
+				LoadJson(tChild, "Backtrack", tGroup.m_iBacktrack);
+				LoadJson(tChild, "BacktrackChams", tGroup.m_tBacktrackChams);
+				LoadJson(tChild, "BacktrackGlow", tGroup.m_tBacktrackGlow);
+				LoadJson(tChild, "Trajectory", tGroup.m_iTrajectory);
+				LoadJson(tChild, "Sightlines", tGroup.m_iSightlines);
+
+				F::Groups.m_vGroups.push_back(tGroup);
+			}
+		}
+		else
+			SDK::Output("SixBox", "Config groups not found", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+
+
+		MigrateBrandLabels();
+		F::Binds.SetVars(nullptr, nullptr, false);
+
+		m_sCurrentVisuals = sConfigName;
+		SaveState();
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Visual config {} loaded", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+		bTransaction = false;
+	}
+	catch (...)
+	{
+		if (bTransaction)
+		{
+			std::scoped_lock lock(F::Binds.m_mMutex);
+			F::Groups.m_vGroups = std::move(vOldGroups);
+			for (auto& fRestore : vRestore)
+				fRestore();
+			m_sCurrentVisuals = sOldCurrentVisuals;
+			F::Binds.SetVars(nullptr, nullptr, false);
+		}
+		SDK::Output("SixBox", "Load visuals failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+		return false;
+	}
+	return true;
+}
+
+template <class T>
+static inline void ResetMain(BaseVar*& pBase)
+{
+	auto pVar = pBase->As<T>();
+
+	pVar->Map = { { DEFAULT_BIND, pVar->Default } };
+}
+#define Reset(t) if (IsType(t)) ResetMain<t>(pBase);
+
+void CConfigs::DeleteConfig(const std::string& sConfigName, bool bNotify)
+{
+	const std::filesystem::path tPath = GetConfigFilePath(m_sConfigPath, sConfigName, m_sConfigExtension);
+	if (tPath.empty())
+		return;
+
+	try
+	{
+		if (FNV1A::Hash32(sConfigName.c_str()) == FNV1A::Hash32Const("default"))
+		{
+			ResetConfig(sConfigName);
+			return;
+		}
+
+		std::filesystem::remove(tPath);
+		if (FNV1A::Hash32(m_sCurrentConfig.c_str()) == FNV1A::Hash32(sConfigName.c_str()))
+			LoadConfig("default", false);
+
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Config {} deleted", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Remove config failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+	}
+}
+
+void CConfigs::ResetConfig(const std::string& sConfigName, bool bNotify)
+{
+	if (GetConfigFilePath(m_sConfigPath, sConfigName, m_sConfigExtension).empty())
+		return;
+
+	try
+	{
+		F::Binds.m_vBinds.clear();
+		F::Groups.m_vGroups.clear();
+
+		bool bNoSave = !Vars::Config::LoadDebugSettings.Value && !(GetAsyncKeyState(VK_SHIFT) & 0x8000);
+		for (auto& pBase : G::Vars)
+		{
+			if (bNoSave && pBase->m_iFlags & NOSAVE)
+				continue;
+
+			Reset(bool)
+			else Reset(int)
+			else Reset(float)
+			else Reset(IntRange_t)
+			else Reset(FloatRange_t)
+			else Reset(std::string)
+			else Reset(std::vector<std::string>)
+			else Reset(Color_t)
+			else Reset(Gradient_t)
+			else Reset(DragBox_t)
+			else Reset(WindowBox_t)
+		}
+
+		SaveConfig(sConfigName, false);
+		F::Binds.SetVars(nullptr, nullptr, false);
+		H::Fonts.Reload();
+
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Config {} reset", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Reset config failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+	}
+}
+
+void CConfigs::DeleteVisual(const std::string& sConfigName, bool bNotify)
+{
+	const std::filesystem::path tPath = GetConfigFilePath(m_sVisualsPath, sConfigName, m_sConfigExtension);
+	if (tPath.empty())
+		return;
+
+	try
+	{
+		std::filesystem::remove(tPath);
+
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Visual config {} deleted", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Remove visuals failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+	}
+}
+
+void CConfigs::ResetVisual(const std::string& sConfigName, bool bNotify)
+{
+	if (GetConfigFilePath(m_sVisualsPath, sConfigName, m_sConfigExtension).empty())
+		return;
+
+	try
+	{
+		F::Groups.m_vGroups.clear();
+
+		bool bNoSave = !(GetAsyncKeyState(VK_SHIFT) & 0x8000);
+		for (auto& pBase : G::Vars)
+		{
+			if (!(pBase->m_iFlags & VISUAL) || bNoSave && pBase->m_iFlags & NOSAVE)
+				continue;
+
+			Reset(bool)
+			else Reset(int)
+			else Reset(float)
+			else Reset(IntRange_t)
+			else Reset(FloatRange_t)
+			else Reset(std::string)
+			else Reset(std::vector<std::string>)
+			else Reset(Color_t)
+			else Reset(Gradient_t)
+			else Reset(DragBox_t)
+			else Reset(WindowBox_t)
+		}
+
+		SaveVisual(sConfigName, false);
+		MigrateBrandLabels();
+		F::Binds.SetVars(nullptr, nullptr, false);
+
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Visual config {} reset", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Reset visuals failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+	}
+}
+
+bool CConfigs::SaveSkins(const std::string& sConfigName, bool bNotify)
+{
+	const std::filesystem::path tPath = GetConfigFilePath(m_sSkinsPath, sConfigName, m_sConfigExtension);
+	if (tPath.empty())
+		return false;
+
+	try
+	{
+		boost::property_tree::ptree tWrite;
+		SaveSkinChanger(tWrite);
+		WriteJson(tPath, tWrite);
+		m_sCurrentSkins = sConfigName;
+		SaveState();
+	if (bNotify)
+		SDK::Output("SixBox", std::format("Skin config {} saved", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Save skins failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+		return false;
+	}
+	return true;
+}
+
+bool CConfigs::LoadSkins(const std::string& sConfigName, bool bNotify)
+{
+	LoadingScope_t tLoading(m_bSkinsLoading);
+	const std::filesystem::path tPath = GetConfigFilePath(m_sSkinsPath, sConfigName, m_sConfigExtension);
+	if (tPath.empty())
+		return false;
+
+	auto mOldSkins = F::SkinChanger.GetSkins();
+	auto tOldBackpack = F::SkinChanger.GetBackpack();
+	auto mOldLoadout = F::SkinChanger.GetLoadout();
+	const std::string sOldCurrentSkins = m_sCurrentSkins;
+	bool bTransaction = false;
+	try
+	{
+		if (!std::filesystem::exists(tPath))
+			return false;
+
+		boost::property_tree::ptree tRead;
+		read_json(tPath.string(), tRead);
+		bTransaction = true;
+
+		LoadSkinChanger(tRead);
+
+		m_sCurrentSkins = sConfigName;
+		SaveState();
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Skin config {} loaded", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+		bTransaction = false;
+	}
+	catch (...)
+	{
+		if (bTransaction)
+		{
+			F::SkinChanger.SetSkins(std::move(mOldSkins));
+			F::SkinChanger.SetBackpack(std::move(tOldBackpack));
+			F::SkinChanger.SetLoadout(std::move(mOldLoadout));
+			m_sCurrentSkins = sOldCurrentSkins;
+		}
+		SDK::Output("SixBox", "Load skins failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+		return false;
+	}
+	return true;
+}
+
+void CConfigs::DeleteSkins(const std::string& sConfigName, bool bNotify)
+{
+	const std::filesystem::path tPath = GetConfigFilePath(m_sSkinsPath, sConfigName, m_sConfigExtension);
+	if (tPath.empty())
+		return;
+
+	try
+	{
+		std::filesystem::remove(tPath);
+
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Skin config {} deleted", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Remove skins failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+	}
+}
+
+void CConfigs::ResetSkins(const std::string& sConfigName, bool bNotify)
+{
+	if (GetConfigFilePath(m_sSkinsPath, sConfigName, m_sConfigExtension).empty())
+		return;
+
+	try
+	{
+		F::SkinChanger.SetSkins({});
+		F::SkinChanger.ClearBackpack();
+		F::SkinChanger.SetLoadout({});
+
+		SaveSkins(sConfigName, false);
+
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Skin config {} reset", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+	}
+	catch (...)
+	{
+		SDK::Output("SixBox", "Reset skins failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
+	}
+}

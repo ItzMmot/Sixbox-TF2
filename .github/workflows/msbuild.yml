@@ -13,8 +13,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for test in aim_policy burst_planner seam_geometry splash_window animation_timeline sticky_search auto_trolldier spy_knife jump_coach jump_coach_smoothing menu_background; do
-            g++ -std=c++20 -O2 -Wall -Wextra -Werror "tests/${test}_test.cpp" -o "${RUNNER_TEMP}/${test}_test"
+          for test in aim_policy burst_planner seam_geometry splash_window animation_timeline sticky_search auto_trolldier spy_knife jump_coach jump_coach_smoothing menu_background material_registry identity_migration; do
+            g++ -std=c++20 -O2 -pthread -Wall -Wextra -Werror "tests/${test}_test.cpp" -o "${RUNNER_TEMP}/${test}_test"
             "${RUNNER_TEMP}/${test}_test"
           done
 
@@ -41,14 +41,14 @@ jobs:
 
     - name: Build
       working-directory: ${{ env.GITHUB_WORKSPACE }}
-      run: msbuild Unibox.sln /p:Platform=${{ matrix.platform }} /p:Configuration=${{ matrix.configuration }}
+      run: msbuild SixBox.sln /p:Platform=${{ matrix.platform }} /p:Configuration=${{ matrix.configuration }}
     
     - uses: actions/upload-artifact@v4
       with:
-        name: Unibox${{ matrix.platform }}${{ matrix.configuration }}
+        name: SixBox${{ matrix.platform }}${{ matrix.configuration }}
         path: output/${{ matrix.platform }}/${{ matrix.configuration }}/*.dll
     
     - uses: actions/upload-artifact@v4
       with:
-        name: Unibox${{ matrix.platform }}${{ matrix.configuration }}PDB
+        name: SixBox${{ matrix.platform }}${{ matrix.configuration }}PDB
         path: output/${{ matrix.platform }}/${{ matrix.configuration }}/*.pdb

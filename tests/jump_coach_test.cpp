@@ -11,7 +11,7 @@
 #include <limits>
 #define min(a,b) windows_min_must_not_expand(a,b)
 #define max(a,b) windows_max_must_not_expand(a,b)
-#include "../Unibox/src/Features/Visuals/JumpCoach/CoachPolicy.h"
+#include "../SixBox/src/Features/Visuals/JumpCoach/CoachPolicy.h"
 #undef min
 #undef max
 static size_t allocations=0;

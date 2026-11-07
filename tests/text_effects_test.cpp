@@ -1,5 +1,5 @@
 // tests/text_effects_test.cpp — TextEffects mask and bundled ImGui integration tests.
-#include "../Unibox/src/Features/ImGui/TextEffects/TextEffects.h"
+#include "../SixBox/src/Features/ImGui/TextEffects/TextEffects.h"
 #include <ImGui/imgui_internal.h>
 #include <cassert>
 #include <cstdio>

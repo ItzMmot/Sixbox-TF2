@@ -10,7 +10,7 @@ args = argparse.ArgumentParser(description="Audit crate resolution against a TF2
 args.add_argument("schema", type=Path)
 schema_path = args.parse_args().schema
 repo = Path(__file__).resolve().parents[1]
-work = tempfile.TemporaryDirectory(prefix="unibox-crates-")
+work = tempfile.TemporaryDirectory(prefix="sixbox-crates-")
 work_path = Path(work.name)
 import re
 from pathlib import Path
@@ -43,7 +43,7 @@ root={k:schema[k]for k in ['client_loot_lists','item_collections','revolving_loo
 def vdf(d):
  return '\n'.join(json.dumps(k,ensure_ascii=False)+' '+('{\n'+vdf(v)+'\n}' if isinstance(v,dict) else json.dumps(str(v),ensure_ascii=False)) for k,v in d.items())
 (work_path/'schema.vdf').write_text(vdf(root))
-s=(repo/'Unibox/src/Features/Visuals/SkinChanger/SkinChanger.cpp').read_text();a=s.index('\tstruct LocalCrateProfile_t');b=s.index('\n\tvoid PopulateCrateAttributes(',a);code=s[a:b];a=code.index('\tKeyValues* LoadCrateSchema()');b=code.index('\n\tusing CrateSeriesMap_t',a);code=code[:a]+'\tKeyValues* LoadCrateSchema() { return gSchema; }\n'+code[b:]
+s=(repo/'SixBox/src/Features/Visuals/SkinChanger/SkinChanger.cpp').read_text();a=s.index('\tstruct LocalCrateProfile_t');b=s.index('\n\tvoid PopulateCrateAttributes(',a);code=s[a:b];a=code.index('\tKeyValues* LoadCrateSchema()');b=code.index('\n\tusing CrateSeriesMap_t',a);code=code[:a]+'\tKeyValues* LoadCrateSchema() { return gSchema; }\n'+code[b:]
 a=code.index('\tCrateSeriesMap_t LoadCrateCache(');b=code.index('\n\tvoid BuildCrateProfiles(',a);code=code[:a]+'\tCrateSeriesMap_t gDiskCache;\n\tCrateSeriesMap_t LoadCrateCache(const std::unordered_map<uint16_t, KeyValues*>&) { return gDiskCache; }\n\tvoid SaveCrateCache() {}\n'+code[b:]
 pre=r'''#include <string>
 #include <vector>
@@ -75,6 +75,7 @@ KeyValues* parse(std::istream& in){auto* root=new KeyValues;KeyValues** tail=&ro
 post=r'''
 int main(int argc,char** argv){assert(argc==2);std::ifstream in(argv[1]);gSchema=parse(in);std::unordered_map<std::string,uint16_t> names;std::unordered_map<uint16_t,KeyValues*> defs;for(auto* d=CrateFirstKey(gSchema->FindKey("items"));d;d=d->peer){uint16_t id=atoi(d->GetName());names.emplace(d->GetString("name"),id);defs.emplace(id,d);}BuildCrateProfiles(names,defs);int ok=0,failed=0;for(auto&[id,p]:s_mCrateProfiles){if(p.vItems.empty()){std::cout<<"MISSING "<<id<<" "<<defs[id]->GetString("name")<<" series "<<p.iSeries<<"\n";failed++;}else{ok++;for(auto v:p.vItems)assert(defs.contains(v));}}assert(s_mCrateProfiles[5048].iKeyDef==5049);assert(s_mCrateProfiles[5048].iAltKeyDef==5021);assert(s_mCrateProfiles[5642].iKeyDef==5643);std::cout<<"Crate definitions covered: "<<ok<<"; missing: "<<failed<<"\n";assert(s_mCrateProfiles[5807].vItems.size()==15);assert(s_mCrateProfiles[15000].vItems.empty());assert(s_mCrateProfiles[5737].vItems.size()==44);assert(s_mCrateProfiles[5642].vItems.size()==8);assert(!s_mCrateProfiles[18000].iKeyDef);assert(!failed);
  {std::istringstream valid("UNIBOX_CRATE_LOOT_CACHE 1\n62 3 30090 30090 65534\n");auto m=ReadCrateCache(valid,defs);assert(m[62]==std::vector<uint16_t>{30090});}
+ {std::istringstream valid("SIXBOX_CRATE_LOOT_CACHE 1\n62 3 30090 30090 65534\n");auto m=ReadCrateCache(valid,defs);assert(m[62]==std::vector<uint16_t>{30090});}
  for(auto data:{"bad 1", "UNIBOX_CRATE_LOOT_CACHE 2", "UNIBOX_CRATE_LOOT_CACHE 1\n62 2 30090", "UNIBOX_CRATE_LOOT_CACHE 1\n62", "UNIBOX_CRATE_LOOT_CACHE 1\n62 1000000"}){std::istringstream input(data);assert(ReadCrateCache(input,defs).empty());}
  gDiskCache=s_mCrateSeries;auto* removed=gSchema->FindKey("client_loot_lists/supply_crate_loot_list_1");assert(removed);removed->name="removed_in_future_update";BuildCrateProfiles(names,defs);assert(s_mCrateProfiles[5022].vItems==gDiskCache[1]);
  std::cout<<"PASS cache validation and removed-list recovery\n";
@@ -89,7 +90,7 @@ int main(int argc,char** argv){assert(argc==2);std::ifstream in(argv[1]);gSchema
  std::cout<<"PASS nested collections, zero weights, unknown lists and cycle protection\n";
 }
 '''
-pre = pre.replace("CRATE_DATA_HEADER", (repo/"Unibox/src/Features/Visuals/SkinChanger/CrateLootData.h").as_posix())
+pre = pre.replace("CRATE_DATA_HEADER", (repo/"SixBox/src/Features/Visuals/SkinChanger/CrateLootData.h").as_posix())
 source_path = work_path/"test.cpp"
 source_path.write_text(pre+code+post)
 binary = work_path/"test"

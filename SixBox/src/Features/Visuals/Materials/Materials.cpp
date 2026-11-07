@@ -1,0 +1,679 @@
+#include "Materials.h"
+
+#include "../Glow/Glow.h"
+#ifndef TEXTMODE
+#include "../Aura/Aura.h"
+#endif
+#include "../CameraWindow/CameraWindow.h"
+#include "../../Configs/Configs.h"
+#include "../../Binds/Binds.h"
+#include "../Groups/Groups.h"
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <fstream>
+
+static bool IsSafeMaterialName(const std::string& sName)
+{
+	if (sName.empty() || sName == "." || sName == ".." || sName.size() > 128)
+		return false;
+
+	for (unsigned char c : sName)
+	{
+		if (c < 32 || c == '<' || c == '>' || c == ':' || c == '"' || c == '/' || c == '\\' || c == '|' || c == '?' || c == '*')
+			return false;
+	}
+	if (sName.back() == '.' || sName.back() == ' ')
+		return false;
+
+	std::string sDevice = sName.substr(0, sName.find('.'));
+	for (char& c : sDevice)
+		c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+	if (sDevice == "CON" || sDevice == "PRN" || sDevice == "AUX" || sDevice == "NUL")
+		return false;
+	if (sDevice.size() == 4 && (sDevice.starts_with("COM") || sDevice.starts_with("LPT")) && sDevice.back() >= '1' && sDevice.back() <= '9')
+		return false;
+
+	return std::filesystem::path(sName).filename() == sName;
+}
+
+static std::filesystem::path GetMaterialFilePath(const char* sName)
+{
+	if (!sName || !*sName)
+		return {};
+
+	try
+	{
+		std::string sCleanName = sName;
+		if (sCleanName.ends_with(".vmt"))
+			sCleanName.erase(sCleanName.size() - 4);
+
+		if (!IsSafeMaterialName(sCleanName))
+			return {};
+
+		std::filesystem::path tDirectory = std::filesystem::path(F::Configs.m_sMaterialsPath).lexically_normal();
+		if (!tDirectory.empty() && (tDirectory.filename().empty() || tDirectory.filename() == ".") && tDirectory != tDirectory.root_path())
+			tDirectory = tDirectory.parent_path();
+
+		const std::filesystem::path tPath = (tDirectory / (sCleanName + ".vmt")).lexically_normal();
+		return tPath.parent_path() == tDirectory ? tPath : std::filesystem::path{};
+	}
+	catch (...)
+	{
+		return {};
+	}
+}
+
+IMaterial* CMaterials::Create(char const* szName, KeyValues* pKV)
+{
+	IMaterial* pMaterial = I::MaterialSystem->CreateMaterial(szName, pKV);
+	if (!pMaterial)
+		return nullptr;
+
+	TrackMaterial(pMaterial);
+	return pMaterial;
+}
+
+void CMaterials::RequestLoad()
+{
+	PendingOperation expected = PendingOperation::None;
+	m_ePendingOperation.compare_exchange_strong(expected, PendingOperation::Load);
+}
+
+void CMaterials::RequestUnload()
+{
+	m_bUnloadComplete = false;
+	m_ePendingOperation = PendingOperation::Unload;
+}
+
+bool CMaterials::IsUnloadComplete() const
+{
+	return m_bUnloadComplete.load();
+}
+
+static inline void RemoveVars(Material_t& tMaterial)
+{
+	tMaterial.m_bStored = false;
+	tMaterial.m_phongtint = nullptr;
+	tMaterial.m_envmaptint = nullptr;
+	tMaterial.m_bInvertCull = false;
+	tMaterial.m_bBlockOccluded = false;
+}
+
+static inline void StoreVars(Material_t& tMaterial)
+{
+	if (tMaterial.m_bStored || !tMaterial.m_pMaterial)
+		return;
+
+	tMaterial.m_bStored = true;
+
+	bool bFound; auto $phongtint = tMaterial.m_pMaterial->FindVar("$phongtint", &bFound, false);
+	if (bFound)
+		tMaterial.m_phongtint = $phongtint;
+
+	auto $envmaptint = tMaterial.m_pMaterial->FindVar("$envmaptint", &bFound, false);
+	if (bFound)
+		tMaterial.m_envmaptint = $envmaptint;
+
+	auto $invertcull = tMaterial.m_pMaterial->FindVar("$invertcull", &bFound, false);
+	if (bFound && $invertcull && $invertcull->GetIntValueInternal())
+		tMaterial.m_bInvertCull = true;
+
+	auto $blockoccluded = tMaterial.m_pMaterial->FindVar("$blockoccluded", &bFound, false);
+	if (bFound && $blockoccluded && $blockoccluded->GetIntValueInternal())
+		tMaterial.m_bBlockOccluded = true;
+}
+
+void CMaterials::ServicePendingOperation()
+{
+	const PendingOperation operation = m_ePendingOperation.exchange(PendingOperation::None);
+	if (operation == PendingOperation::None)
+		return;
+
+	const char* sName = "Materials.None";
+	switch (operation)
+	{
+	case PendingOperation::Load: sName = "Materials.Load"; break;
+	case PendingOperation::Refresh: sName = "Materials.Refresh"; break;
+	case PendingOperation::Reload: sName = "Materials.Reload"; break;
+	case PendingOperation::Unload: sName = "Materials.Unload"; break;
+	case PendingOperation::None: break;
+	}
+	SDK::CInitTimingScope tOperation(sName);
+	m_bLoading = operation == PendingOperation::Load || operation == PendingOperation::Refresh || operation == PendingOperation::Reload;
+
+	switch (operation)
+	{
+	case PendingOperation::Load:
+		if (!m_bLoaded)
+			LoadMaterials();
+		break;
+	case PendingOperation::Refresh:
+		UnloadMaterials();
+		LoadMaterials();
+		break;
+	case PendingOperation::Reload:
+		UnloadMaterials();
+		I::MaterialSystem->ReloadMaterials();
+		LoadMaterials();
+		break;
+	case PendingOperation::Unload:
+		UnloadMaterials();
+		I::MaterialSystem->Flush(true);
+		m_bUnloadComplete = true;
+		break;
+	case PendingOperation::None:
+		break;
+	}
+	m_bLoading = false;
+}
+
+IMaterial* CMaterials::create_from_vmt(const char* name, const std::string& vmt)
+{
+	KeyValues* kv = new KeyValues(name);
+	if (!kv)
+		return nullptr;
+
+	if (!kv->LoadFromBuffer(name, vmt.c_str()))
+	{
+		kv->DeleteThis();
+		return nullptr;
+	}
+
+	return Create(name, kv);
+}
+
+void CMaterials::Remove(IMaterial* pMaterial)
+{
+	if (!pMaterial)
+		return;
+
+	// Release the registry lock before calling the engine; it may re-enter
+	// CMaterial_Uncache synchronously while destroying this material.
+	m_registry.Erase(pMaterial);
+
+	pMaterial->DecrementReferenceCount();
+	pMaterial->DeleteIfUnreferenced();
+	pMaterial = nullptr;
+}
+
+void CMaterials::StoreStruct(const std::string& sName, const std::string& sVMT, bool bLocked)
+{
+	Material_t tMaterial = {};
+	tMaterial.m_sName = sName;
+	tMaterial.m_sVMT = sVMT;
+	tMaterial.m_bLocked = bLocked;
+
+	m_mMaterials[FNV1A::Hash32(sName.c_str())] = tMaterial;
+}
+
+static inline std::string to_lower(std::string value)
+{
+	std::ranges::transform(value, value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return value;
+}
+
+static inline bool has_material_key(const std::string& vmt, const char* key)
+{
+	return to_lower(vmt).find(to_lower(key)) != std::string::npos;
+}
+
+static inline bool is_vertex_lit_generic(const std::string& vmt)
+{
+	const std::string lower = to_lower(vmt);
+	const size_t body = lower.find('{');
+	const size_t shader = lower.find("vertexlitgeneric");
+	return shader != std::string::npos && (body == std::string::npos || shader < body);
+}
+
+static inline std::string modify_vmt(const std::string& vmt)
+{
+	const size_t insert_pos = vmt.find_last_of('}');
+	if (insert_pos == std::string::npos)
+		return vmt;
+
+	std::string modified = vmt;
+	std::string append;
+	const bool has_cloak_factor = has_material_key(vmt, "$cloakfactor");
+
+	if (!has_material_key(vmt, "$model"))
+		append += "\n\t$model \"1\"";
+
+	if (SDK::SupportsDX9Shaders())
+	{
+		if (!has_cloak_factor && !has_material_key(vmt, "$cloakpassenabled"))
+			append += "\n\t$cloakpassenabled \"1\"";
+
+		if (!has_cloak_factor && is_vertex_lit_generic(vmt) && !has_material_key(vmt, "proxies"))
+			append += "\n\tProxies\n\t{\n\t\tinvis\n\t\t{\n\t\t}\n\t}";
+	}
+
+	if (!append.empty())
+		modified.insert(insert_pos, append);
+
+	return modified;
+}
+
+void CMaterials::LoadMaterials()
+{
+	SDK::CInitTimingScope tTotal("LoadMaterials total");
+	const bool bDx9Shaders = SDK::SupportsDX9Shaders();
+
+	StoreStruct(
+		"None",
+			"\"UnlitGeneric\""
+			"\n{"
+			"\n\t$color2 \"[0 0 0]\""
+			"\n\t$additive \"1\""
+			"\n}",
+		true);
+	StoreStruct(
+		"Flat",
+			"\"UnlitGeneric\""
+			"\n{"
+			"\n\t$basetexture \"white\""
+			"\n}",
+		true);
+	StoreStruct(
+		"Shaded",
+			bDx9Shaders
+			? "\"VertexLitGeneric\""
+			  "\n{"
+			  "\n\t$basetexture \"white\""
+			  "\n}"
+			: "\"UnlitGeneric\""
+			  "\n{"
+			  "\n\t$basetexture \"white\""
+			  "\n}",
+		true);
+	StoreStruct(
+		"Wireframe",
+			"\"UnlitGeneric\""
+			"\n{"
+			"\n\t$basetexture \"white\""
+			"\n\t$wireframe \"1\""
+			"\n}",
+		true);
+	StoreStruct(
+		"Fresnel",
+			bDx9Shaders
+			? "\"VertexLitGeneric\""
+			  "\n{"
+			  "\n\t$basetexture \"white\""
+			  "\n\t$bumpmap \"models/player/shared/shared_normal\""
+			  "\n\t$color2 \"[0 0 0]\""
+			  "\n\t$additive \"1\""
+			  "\n\t$phong \"1\""
+			  "\n\t$phongfresnelranges \"[0 0.5 1]\""
+			  "\n\t$envmap \"skybox/sky_dustbowl_01\""
+			  "\n\t$envmapfresnel \"1\""
+			  "\n}"
+			: "\"UnlitGeneric\""
+			  "\n{"
+			  "\n\t$basetexture \"white\""
+			  "\n\t$additive \"1\""
+			  "\n}",
+		true);
+	StoreStruct(
+		"Shine",
+			bDx9Shaders
+			? "\"VertexLitGeneric\""
+			  "\n{"
+			  "\n\t$additive \"1\""
+			  "\n\t$envmap \"cubemaps/cubemap_sheen002.hdr\""
+			  "\n\t$envmaptint \"[1 1 1]\""
+			  "\n}"
+			: "\"UnlitGeneric\""
+			  "\n{"
+			  "\n\t$basetexture \"white\""
+			  "\n\t$additive \"1\""
+			  "\n}",
+		true);
+	StoreStruct(
+		"Tint",
+			bDx9Shaders
+			? "\"VertexLitGeneric\""
+			  "\n{"
+			  "\n\t$basetexture \"models/player/shared/ice_player\""
+			  "\n\t$bumpmap \"models/player/shared/shared_normal\""
+			  "\n\t$additive \"1\""
+			  "\n\t$phong \"1\""
+			  "\n\t$phongfresnelranges \"[0 0.001 0.001]\""
+			  "\n\t$envmap \"skybox/sky_dustbowl_01\""
+			  "\n\t$envmapfresnel \"1\""
+			  "\n\t$selfillum \"1\""
+			  "\n\t$selfillumtint \"[0 0 0]\""
+			  "\n}"
+			: "\"UnlitGeneric\""
+			  "\n{"
+			  "\n\t$basetexture \"white\""
+			  "\n\t$additive \"1\""
+			  "\n}",
+		true);
+
+	std::error_code tError;
+	for (std::filesystem::directory_iterator tIterator(F::Configs.m_sMaterialsPath, tError), tEnd; !tError && tIterator != tEnd; tIterator.increment(tError))
+	{
+		auto& tEntry = *tIterator;
+
+		if (!tEntry.is_regular_file(tError) || tError || tEntry.path().extension() != ".vmt")
+		{
+			tError.clear();
+			continue;
+		}
+
+		std::ifstream fStream(tEntry.path());
+		if (!fStream.good())
+			continue;
+
+		std::string sName = tEntry.path().filename().string();
+		sName.erase(sName.end() - 4, sName.end());
+		if (sName.empty())
+			continue;
+
+		std::string sVMT((std::istreambuf_iterator(fStream)), std::istreambuf_iterator<char>());
+
+		auto uHash = FNV1A::Hash32(sName.c_str());
+		if (uHash == FNV1A::Hash32Const("Original") || m_mMaterials.contains(uHash))
+			continue;
+
+		StoreStruct(sName, sVMT);
+	}
+
+	for (auto& tMaterial : m_mMaterials | std::views::values)
+	{
+		const double flStart = SDK::InitNowMs();
+		const std::string material_vmt = modify_vmt(tMaterial.m_sVMT);
+		tMaterial.m_pMaterial = create_from_vmt(tMaterial.m_sName.c_str(), material_vmt);
+		const double flMs = SDK::InitNowMs() - flStart;
+		if (flMs >= 5.0)
+			SDK::LogInitTiming(std::format("LoadMaterials create {}", tMaterial.m_sName).c_str(), flMs);
+
+	}
+
+	{
+		SDK::CInitTimingScope tTargets("LoadMaterials render targets");
+		if (bDx9Shaders)
+			I::MaterialSystem->BeginRenderTargetAllocation();
+		F::Glow.Initialize();
+#ifndef TEXTMODE
+        F::Aura.InitializeMaterials();
+#endif
+		F::CameraWindow.Initialize();
+		if (bDx9Shaders)
+			I::MaterialSystem->EndRenderTargetAllocation();
+	}
+
+	{
+		SDK::CInitTimingScope tStd("LoadMaterials InitializeStandardMaterials");
+		S::InitializeStandardMaterials.Call<void>();
+	}
+	auto pMaterial = *reinterpret_cast<IMaterial**>(U::Memory.RelToAbs(S::Wireframe()));
+	if (pMaterial)
+		pMaterial->SetMaterialVarFlag(MATERIAL_VAR_VERTEXALPHA, true);
+
+	static std::unordered_map<std::string, int> mSkyboxes = {};
+	static std::vector<const char*> vFaces = { "rt.vmt", "lf.vmt", "bk.vmt", "ft.vmt", "up.vmt", "dn.vmt" };
+	{
+		SDK::CInitTimingScope tSkyboxes("LoadMaterials skybox scan");
+		if (mSkyboxes.empty())
+		{
+			FileFindHandle_t hFind = -1;
+			for (char const* szFile = I::FileSystem->FindFirst("materials/skybox/*.vmt", &hFind); szFile && *szFile; szFile = I::FileSystem->FindNext(hFind))
+			{
+				std::string sFile = szFile;
+
+				int iFace = -1;
+				for (int i = 0; i < vFaces.size(); i++)
+				{
+					auto sFace = vFaces[i];
+					if (sFile.find(sFace) == sFile.length() - strlen(sFace))
+					{
+						iFace = 1 << i;
+						sFile = sFile.substr(0, sFile.length() - strlen(sFace));
+						break;
+					}
+				}
+				if (iFace == -1)
+					continue;
+
+				mSkyboxes[sFile] |= iFace;
+			}
+			if (hFind != -1)
+				I::FileSystem->FindClose(hFind);
+		}
+
+		Vars::Visuals::World::SkyboxChanger.m_vValues = { "Off" };
+		for (auto& [sSkybox, iFaces] : mSkyboxes)
+		{
+			if (iFaces == 0b111111)
+				Vars::Visuals::World::SkyboxChanger.m_vValues.push_back(sSkybox.c_str());
+		}
+	}
+
+	m_bLoaded = true;
+}
+
+void CMaterials::UnloadMaterials()
+{
+	m_bLoaded = false;
+
+	F::Glow.Unload();
+#ifndef TEXTMODE
+    F::Aura.ShutdownMaterials();
+#endif
+	F::CameraWindow.Unload();
+
+	for (auto& tMaterial : m_mMaterials | std::views::values)
+		Remove(tMaterial.m_pMaterial);
+	m_mMaterials.clear();
+	m_registry.Clear();
+}
+
+void CMaterials::ReloadMaterials()
+{
+	PendingOperation pending = m_ePendingOperation.load();
+	while (pending != PendingOperation::Unload
+		&& !m_ePendingOperation.compare_exchange_weak(pending, PendingOperation::Reload))
+	{
+	}
+}
+
+void CMaterials::RefreshMaterials()
+{
+	PendingOperation pending = m_ePendingOperation.load();
+	while (pending != PendingOperation::Unload && pending != PendingOperation::Reload
+		&& !m_ePendingOperation.compare_exchange_weak(pending, PendingOperation::Refresh))
+	{
+	}
+}
+
+void CMaterials::SetColor(Material_t* pMaterial, Color_t tColor)
+{
+	float r = tColor.r / 255.f;
+	float g = tColor.g / 255.f;
+	float b = tColor.b / 255.f;
+	float a = tColor.a / 255.f;
+
+	I::RenderView->SetColorModulation(r, g, b);
+	I::RenderView->SetBlend(a);
+
+	if (pMaterial)
+	{
+		StoreVars(*pMaterial);
+		if (pMaterial->m_phongtint)
+			pMaterial->m_phongtint->SetVecValue(r, g, b);
+		if (pMaterial->m_envmaptint)
+			pMaterial->m_envmaptint->SetVecValue(r, g, b);
+	}
+}
+
+Material_t* CMaterials::GetMaterial(uint32_t uHash)
+{
+	if (uHash == FNV1A::Hash32Const("Original"))
+		return nullptr;
+
+	return m_mMaterials.contains(uHash) ? &m_mMaterials[uHash] : nullptr;
+}
+
+std::string CMaterials::GetVMT(uint32_t uHash)
+{
+	if (m_mMaterials.contains(uHash))
+		return m_mMaterials[uHash].m_sVMT;
+
+	return "";
+}
+
+void CMaterials::AddMaterial(const char* sName)
+{
+	std::string sCleanName = sName ? sName : "";
+	if (sCleanName.ends_with(".vmt"))
+		sCleanName.erase(sCleanName.size() - 4);
+
+	const std::filesystem::path tPath = GetMaterialFilePath(sCleanName.c_str());
+	if (tPath.empty())
+		return;
+
+	auto uHash = FNV1A::Hash32(sCleanName.c_str());
+	std::error_code tError;
+	if (uHash == FNV1A::Hash32Const("Original") || std::filesystem::exists(tPath, tError) || tError || m_mMaterials.contains(uHash))
+		return;
+
+	StoreStruct(
+		sCleanName,
+			"\"VertexLitGeneric\""
+			"\n{"
+			"\n\t$basetexture \"white\""
+			"\n}"
+		);
+	auto& tMaterial = m_mMaterials[uHash];
+
+	const std::string material_vmt = modify_vmt(tMaterial.m_sVMT);
+	tMaterial.m_pMaterial = create_from_vmt(sCleanName.c_str(), material_vmt);
+	if (!tMaterial.m_pMaterial)
+	{
+		m_mMaterials.erase(uHash);
+		return;
+	}
+
+	std::error_code ec;
+	std::filesystem::create_directories(tPath.parent_path(), ec);
+
+	std::ofstream outStream(tPath);
+	if (!outStream)
+	{
+		Remove(tMaterial.m_pMaterial);
+		m_mMaterials.erase(uHash);
+		return;
+	}
+	outStream << tMaterial.m_sVMT;
+	if (!outStream)
+	{
+		std::error_code tRemoveError;
+		std::filesystem::remove(tPath, tRemoveError);
+		Remove(tMaterial.m_pMaterial);
+		m_mMaterials.erase(uHash);
+	}
+}
+
+void CMaterials::EditMaterial(const char* sName, const char* sVMT)
+{
+	const std::filesystem::path tPath = GetMaterialFilePath(sName);
+	if (tPath.empty() || !sVMT)
+		return;
+
+	std::error_code tError;
+	if (!std::filesystem::exists(tPath, tError) || tError)
+		return;
+
+	m_bLoaded = false;
+
+	auto uHash = FNV1A::Hash32(sName);
+	if (m_mMaterials.contains(uHash) && !m_mMaterials[uHash].m_bLocked)
+	{
+		auto& tMaterial = m_mMaterials[uHash];
+
+		const std::string material_vmt = modify_vmt(sVMT);
+		IMaterial* pNewMaterial = create_from_vmt(sName, material_vmt);
+		if (!pNewMaterial)
+		{
+			m_bLoaded = true;
+			return;
+		}
+
+		Remove(tMaterial.m_pMaterial);
+		tMaterial.m_pMaterial = pNewMaterial;
+		RemoveVars(tMaterial);
+		tMaterial.m_sVMT = sVMT;
+
+		std::ofstream outStream(tPath);
+		if (!outStream)
+		{
+			m_bLoaded = true;
+			return;
+		}
+		outStream << sVMT;
+		if (!outStream)
+		{
+			std::error_code tRemoveError;
+			std::filesystem::remove(tPath, tRemoveError);
+			m_bLoaded = true;
+			return;
+		}
+	}
+
+	m_bLoaded = true;
+}
+
+void CMaterials::RemoveMaterial(const char* sName)
+{
+	const std::filesystem::path tPath = GetMaterialFilePath(sName);
+	if (tPath.empty())
+		return;
+
+	std::error_code tError;
+	if (!std::filesystem::exists(tPath, tError) || tError)
+		return;
+
+	m_bLoaded = false;
+
+	auto uHash = FNV1A::Hash32(sName);
+	if (m_mMaterials.contains(uHash) && !m_mMaterials[uHash].m_bLocked)
+	{
+		if (!std::filesystem::remove(tPath, tError) || tError)
+		{
+			m_bLoaded = true;
+			return;
+		}
+
+		Remove(m_mMaterials[uHash].m_pMaterial);
+		m_mMaterials.erase(uHash);
+
+		auto fRemoveFromVal = [&](std::vector<std::pair<std::string, ChamsMaterial_t>>& val)
+		{
+			for (auto it = val.begin(); it != val.end();)
+			{
+				if (FNV1A::Hash32(it->first.c_str()) == uHash)
+					it = val.erase(it);
+				else
+					++it;
+			}
+		};
+		auto fRemoveFromVar = [&](ConfigVar<std::vector<std::pair<std::string, ChamsMaterial_t>>>& var)
+		{
+			for (auto& [iBind, vVal] : var.Map)
+			{
+				fRemoveFromVal(vVal);
+			}
+		};
+		for (auto& tGroup : F::Groups.m_vGroups)
+		{
+			fRemoveFromVal(tGroup.m_tChams.Visible);
+			fRemoveFromVal(tGroup.m_tChams.Occluded);
+			fRemoveFromVal(tGroup.m_tBacktrackChams.Visible);
+			fRemoveFromVal(tGroup.m_tBacktrackChams.Occluded);
+		}
+	}
+
+	m_bLoaded = true;
+}

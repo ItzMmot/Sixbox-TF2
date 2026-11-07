@@ -1,5 +1,5 @@
 // tests/seam_geometry_test.cpp - finite collision-face intersections.
-#include "../Unibox/src/Features/Aimbot/Shared/SeamGeometry.h"
+#include "../SixBox/src/Features/Aimbot/Shared/SeamGeometry.h"
 #include <cassert>
 #include <cstdlib>
 #include <new>

@@ -1,6 +1,6 @@
 // tests/jump_coach_smoothing_test.cpp — JumpCoach::SmoothedPath
-#include "../Unibox/src/Features/Visuals/JumpCoach/CoachPolicy.h"
-#include "../Unibox/src/Features/Visuals/JumpCoach/PathSmoothing.h"
+#include "../SixBox/src/Features/Visuals/JumpCoach/CoachPolicy.h"
+#include "../SixBox/src/Features/Visuals/JumpCoach/PathSmoothing.h"
 #include <cassert>
 #include <limits>
 

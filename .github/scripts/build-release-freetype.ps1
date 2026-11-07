@@ -7,7 +7,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Aura shader source/bytecode validation failed.
 $deps = Join-Path $root '.builds/release'
 $freeTypeRoot = Join-Path $deps 'freetype-install'
 $backend = Join-Path $deps 'imgui/misc/freetype'
-$header = Get-Content 'Unibox/include/ImGui/imgui.h' -Raw
+$header = Get-Content 'SixBox/include/ImGui/imgui.h' -Raw
 $upstreamHeader = Get-Content "$deps/imgui/imgui.h" -Raw
 $pattern = '(?m)^#define IMGUI_VERSION\s+"([^"]+)"'
 if ([regex]::Match($header, $pattern).Groups[1].Value -ne [regex]::Match($upstreamHeader, $pattern).Groups[1].Value) {
@@ -25,7 +25,7 @@ if ($LASTEXITCODE -ne 0) { throw 'FreeType configuration failed.' }
 cmake --build "$deps/freetype-build" --config Release --target install --parallel 2
 if ($LASTEXITCODE -ne 0) { throw 'FreeType build failed.' }
 
-msbuild Unibox.sln /m:2 /p:Configuration=ReleaseAVX2 /p:Platform=x64 `
+msbuild SixBox.sln /m:2 /p:Configuration=ReleaseAVX2 /p:Platform=x64 `
     /p:UseFreeType=true "/p:FreeTypeRoot=$freeTypeRoot" "/p:ImGuiFreeTypeRoot=$backend" `
     "/p:TargetName=$env:RELEASE_NAME"
 if ($LASTEXITCODE -ne 0) { throw 'Client build failed.' }
@@ -39,7 +39,7 @@ $test = Join-Path $deps 'test-freetype.cmd'
 @echo off
 call "$devcmd" -arch=x64 -host_arch=x64 >nul
 if errorlevel 1 exit /b 1
-cl /nologo /std:c++20 /EHsc /MD /O2 /DIMGUI_ENABLE_FREETYPE /I"$root/Unibox/include" /I"$root/Unibox/include/ImGui" /I"$backend" /I"$freeTypeRoot/include/freetype2" "$root/tests/text_effects_test.cpp" "$root/Unibox/src/Features/ImGui/TextEffects/TextEffects.cpp" "$root/Unibox/include/ImGui/imgui.cpp" "$root/Unibox/include/ImGui/imgui_draw.cpp" "$root/Unibox/include/ImGui/imgui_tables.cpp" "$root/Unibox/include/ImGui/imgui_widgets.cpp" "$backend/imgui_freetype.cpp" /Fe:"$deps/text-effects-test.exe" /link "$freeTypeRoot/lib/freetype.lib"
+cl /nologo /std:c++20 /EHsc /MD /O2 /DIMGUI_ENABLE_FREETYPE /I"$root/SixBox/include" /I"$root/SixBox/include/ImGui" /I"$backend" /I"$freeTypeRoot/include/freetype2" "$root/tests/text_effects_test.cpp" "$root/SixBox/src/Features/ImGui/TextEffects/TextEffects.cpp" "$root/SixBox/include/ImGui/imgui.cpp" "$root/SixBox/include/ImGui/imgui_draw.cpp" "$root/SixBox/include/ImGui/imgui_tables.cpp" "$root/SixBox/include/ImGui/imgui_widgets.cpp" "$backend/imgui_freetype.cpp" /Fe:"$deps/text-effects-test.exe" /link "$freeTypeRoot/lib/freetype.lib"
 if errorlevel 1 exit /b 1
 "$deps/text-effects-test.exe" "C:/Windows/Fonts/arial.ttf"
 "@ | Set-Content $test
@@ -53,7 +53,7 @@ Copy-Item "$build/$env:RELEASE_NAME.dll" $bundle
 Copy-Item "$build/$env:RELEASE_NAME.pdb" $bundle
 $licenses = Join-Path $deps 'licenses'
 New-Item -ItemType Directory -Force $licenses | Out-Null
-Copy-Item LICENSE.md "$licenses/Sixbox-LICENSE.md"
+Copy-Item LICENSE.md "$licenses/SixBox-LICENSE.md"
 Copy-Item "$deps/imgui/LICENSE.txt" "$licenses/ImGui-LICENSE.txt"
 Copy-Item "$deps/freetype/LICENSE.TXT" "$licenses/FreeType-LICENSE.txt"
 Copy-Item "$deps/freetype/docs/FTL.TXT" "$licenses/FreeType-FTL.txt"

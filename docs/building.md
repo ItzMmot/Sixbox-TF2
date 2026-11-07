@@ -31,7 +31,7 @@ Optional environment overrides:
 
 ## Rebuild and installation behavior
 
-- Reads the current `ClCompile` source list from `Unibox.vcxproj`, including
+- Reads the current `ClCompile` source list from `SixBox.vcxproj`, including
   optional files guarded with `Exists(...)`.
 - Fingerprints source/header contents, added/deleted files, project/properties,
   the build scripts, dependencies and compiler configuration. A changed input
@@ -44,8 +44,8 @@ Optional environment overrides:
 - Saves a timestamped, checksum-verified backup of the previous DLL, installs
   through atomic replacement, and compares the installed SHA256 with the output.
 
-Output: `output/x64/ReleaseAVX2/Sixboxx64ReleaseFreetypeAVX2.dll`.
-Default installed filename: `Amalgamx64ReleaseFreetypeAVX2.dll`, under
+Output: `output/x64/ReleaseAVX2/SixBoxx64ReleaseFreetypeAVX2.dll`.
+Default installed filename: `SixBoxx64ReleaseFreetypeAVX2.dll`, under
 `~/.local/share/Steam/steamapps/compatdata/440/pfx/drive_c/`.
 
 Build logs, successful input fingerprint, installation receipt and backups live
@@ -55,3 +55,19 @@ not create another backup.
 `--clean` forces a rebuild, `--no-install` only produces the DLL, and `--jobs N`
 sets compile parallelism (default: two). These options are optional; the normal
 command is always `./build.sh`.
+
+
+The project/solution are `SixBox/SixBox.vcxproj` and `SixBox.sln`. The installed
+DLL uses the same `SixBoxx64ReleaseFreetypeAVX2.dll` name as the release artifact.
+After a successful DLL installation, the helper deploys
+`inject-sixbox-offline.bat`. For an existing Steam launch command, the former
+`inject-amalgam-offline.bat` becomes a small forwarding wrapper; its previous
+contents are backed up. Existing launch options therefore still work. Launcher
+files are not changed by `--check` or `--no-install`.
+
+On the first launch of the new client, existing `unibox/` data are copied to
+`6box/` through a staging directory and published by rename. The original data
+are retained, and an existing `6box/` directory is never overwritten. If the
+copy fails, the client uses the old directory for that run. Old default titles
+and tags are normalized to SixBox / [6box]; custom labels are preserved. Loot
+cache readers accept both the former and new file signatures.

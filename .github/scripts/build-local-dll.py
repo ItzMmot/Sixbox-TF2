@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and install Sixbox FreeType AVX2 using the prepared Linux/MSVC toolchain."""
+"""Build and install SixBox FreeType AVX2 using the prepared Linux/MSVC toolchain."""
 import argparse
 import concurrent.futures
 import fcntl
@@ -123,6 +123,15 @@ def pe_imports(data):
     return imports
 
 
+def normalize_output_case(output):
+    """Wine updates an existing case-insensitive match without renaming it."""
+    matches = [p for p in output.parent.iterdir() if p.name.casefold() == output.name.casefold()]
+    require(len(matches) <= 1, f'Ambiguous DLL filename casing in {output.parent}')
+    if matches and matches[0].name != output.name:
+        os.replace(matches[0], output)
+    return output
+
+
 def install(source, target, backups):
     data = source.read_bytes()
     imports = pe_imports(data)
@@ -136,7 +145,7 @@ def install(source, target, backups):
             return {'sha256': sha, 'bytes': len(data), 'imports': imports, 'target': str(target), 'backup': None}
         backups.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-        backup = backups / f'Amalgam-before-{stamp}-{old_sha[:12]}.dll'
+        backup = backups / f'SixBox-before-{stamp}-{old_sha[:12]}.dll'
         shutil.copy2(target, backup)
         require(digest(backup) == old_sha, 'Backup checksum mismatch')
     fd, temporary = tempfile.mkstemp(prefix='.sixbox-', suffix='.dll', dir=target.parent)
@@ -154,6 +163,36 @@ def install(source, target, backups):
     print(f'Installed: {target}\nBackup: {backup}\nSHA256: {sha}', flush=True)
     return {'sha256': sha, 'bytes': len(data), 'imports': imports, 'target': str(target),
             'backup': str(backup) if backup else None}
+
+
+def install_launchers(drive, backups):
+    """Deploy the renamed launcher only after its DLL is installed successfully."""
+    source = ROOT / 'scripts/inject-sixbox-offline.bat'
+    legacy = '@echo off\r\ncall "%~dp0inject-sixbox-offline.bat" %*\r\nexit /b %errorlevel%\r\n'
+    entries = [('inject-sixbox-offline.bat', source.read_text()),
+               ('inject-amalgam-offline.bat', legacy)]
+    for name, text in entries:
+        target = drive / name
+        data = text.replace('\r\n', '\n').replace('\n', '\r\n').encode('utf-8')
+        if target.exists() and target.read_bytes() == data:
+            continue
+        if target.exists():
+            backups.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+            backup = backups / f'launcher-before-{stamp}-{digest(target)[:12]}.bat'
+            shutil.copy2(target, backup)
+            require(digest(backup) == digest(target), 'Launcher backup checksum mismatch')
+        fd, temporary = tempfile.mkstemp(prefix='.sixbox-launcher-', suffix='.bat', dir=drive)
+        try:
+            with os.fdopen(fd, 'wb') as file:
+                file.write(data)
+                file.flush()
+                os.fsync(file.fileno())
+            os.chmod(temporary, 0o644)
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
 
 def main():
@@ -178,11 +217,11 @@ def main():
     boost_source = Path(os.getenv('SIXBOX_BOOST_INCLUDE', '/usr/include'))
     required = [vc / 'bin/Hostx64/x64' / name for name in ['cl.exe', 'lib.exe', 'link.exe']]
     required += [vc / 'lib/x64/libcmt.lib',
-                 ft / 'CMakeLists.txt', ft / 'include/ft2build.h', backend / 'imgui_freetype.cpp',
+                 ROOT / 'scripts/inject-sixbox-offline.bat', ft / 'CMakeLists.txt', ft / 'include/ft2build.h', backend / 'imgui_freetype.cpp',
                  backend / 'imgui_freetype.h', boost_source / 'boost/version.hpp']
     require(any(p.name.casefold() == 'kernel32.lib' for p in (sdk / f'Lib/{sdk_version}/um/x64').glob('*')), 'Windows SDK kernel32 library missing')
     require(all(p.is_file() for p in required), 'Missing build dependencies: ' + ', '.join(str(p) for p in required if not p.is_file()))
-    project = ROOT / 'Unibox/Unibox.vcxproj'
+    project = ROOT / 'SixBox/SixBox.vcxproj'
     sources = project_sources(project) + [backend / 'imgui_freetype.cpp']
     ft_names = re.search(r'set\(BASE_SRCS(.*?)\n\)', (ft / 'CMakeLists.txt').read_text(), re.S)
     require(ft_names, 'FreeType source list not found in CMakeLists.txt')
@@ -213,17 +252,17 @@ def build(args, vc, sdk, sdk_version, ft, backend, boost_source, sources, ft_sou
     env = dict(os.environ, WINEPREFIX=str(ROOT / '.builds/tools/wine'), WINEDEBUG='-all',
                WINEDLLOVERRIDES='mscoree,mshtml=', DISPLAY='', WINEPATH=win(vc / 'bin/Hostx64/x64'))
     env['INCLUDE'] = ';'.join(map(win, [vc / 'include', *[sdk / f'Include/{sdk_version}/{name}'
-        for name in ['ucrt', 'shared', 'um', 'winrt']], shim, ROOT / 'Unibox/include']))
+        for name in ['ucrt', 'shared', 'um', 'winrt']], shim, ROOT / 'SixBox/include']))
     env['LIB'] = ';'.join(map(win, [vc / 'lib/onecore/x64', vc / 'lib/x64',
         sdk / f'Lib/{sdk_version}/ucrt/x64', sdk / f'Lib/{sdk_version}/um/x64']))
     flags = ['/nologo', '/c', '/std:c++latest', '/permissive-', '/EHsc', '/MD', '/O2', '/bigobj',
              '/DNDEBUG', '/D_CONSOLE', '/D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR',
              '/D__CONFIGURATION__="ReleaseAVX2"', '/D__PLATFORM__="x64"', '/W0', '/utf-8',
              '/arch:AVX2', '/DIMGUI_ENABLE_FREETYPE', '/I' + win(ft / 'include'),
-             '/I' + win(backend), '/I' + win(ROOT / 'Unibox/include/ImGui')]
-    folders = [ROOT / 'Unibox/src', ROOT / 'Unibox/include', ft, backend]
+             '/I' + win(backend), '/I' + win(ROOT / 'SixBox/include/ImGui')]
+    folders = [ROOT / 'SixBox/src', ROOT / 'SixBox/include', ft, backend]
     extras = [Path(__file__).resolve(), ROOT / 'build.sh', project, ft / 'CMakeLists.txt', *sources,
-              *ROOT.joinpath('Unibox').glob('*.props'), ROOT / '.github/scripts/build-aura-shaders.py']
+              *ROOT.joinpath('SixBox').glob('*.props'), ROOT / '.github/scripts/build-aura-shaders.py', ROOT / 'scripts/inject-sixbox-offline.bat']
     config = {'flags': flags, 'vc': str(vc), 'sdk': str(sdk), 'sdk_version': sdk_version,
               'cl_sha256': digest(vc / 'bin/Hostx64/x64/cl.exe'), 'boost': str(boost_source.resolve())}
     fingerprint, inputs = snapshot(ROOT, folders, extras, config)
@@ -232,7 +271,7 @@ def build(args, vc, sdk, sdk_version, ft, backend, boost_source, sources, ft_sou
         state = json.loads(state_file.read_text())
     except (FileNotFoundError, ValueError):
         state = {}
-    output = ROOT / 'output/x64/ReleaseAVX2/Sixboxx64ReleaseFreetypeAVX2.dll'
+    output = ROOT / 'output/x64/ReleaseAVX2/SixBoxx64ReleaseFreetypeAVX2.dll'
     reusable = not args.clean and state.get('fingerprint') == fingerprint and output.is_file() and state.get('sha256') == digest(output)
     subprocess.run([sys.executable, str(ROOT / '.github/scripts/build-aura-shaders.py'), '--check'], cwd=ROOT, check=True)
     if reusable:
@@ -253,7 +292,7 @@ def build(args, vc, sdk, sdk_version, ft, backend, boost_source, sources, ft_sou
             if result.returncode:
                 raise RuntimeError(f'{tool} failed ({result.returncode}): {log}\n' + log.read_text(errors='replace')[-6000:])
 
-        header = win(ROOT / 'Unibox/src/SDK/SDK.h')
+        header = win(ROOT / 'SixBox/src/SDK/SDK.h')
         pch = ['/FI' + header, '/Fp' + win(objects / 'sdk.pch')]
         pch_source = objects / 'pch.cpp'
         pch_source.write_text('// SDK precompiled header\n')
@@ -288,11 +327,12 @@ def build(args, vc, sdk, sdk_version, ft, backend, boost_source, sources, ft_sou
         libraries = ['kernel32', 'user32', 'gdi32', 'winspool', 'comdlg32', 'advapi32', 'shell32',
                      'ole32', 'oleaut32', 'uuid', 'odbc32', 'odbccp32', 'd3d9', 'winmm', 'ws2_32', 'psapi', 'shlwapi']
         command = ['/NOLOGO', '/DLL', '/MACHINE:X64', '/INCREMENTAL:NO', '/OPT:REF', '/OPT:ICF',
-                   '/SUBSYSTEM:CONSOLE', '/OUT:' + win(output), win(objects / 'pch.obj'),
+                   '/SUBSYSTEM:CONSOLE', '/MAP:' + win(out / 'client.map'), '/OUT:' + win(output), win(objects / 'pch.obj'),
                    *[win(obj) for _, _, obj in units], win(library), *[name + '.lib' for name in libraries]]
         response = out / 'link.rsp'
         response.write_text('\n'.join('"' + arg + '"' for arg in command))
         invoke('link.exe', ['@' + win(response)], logs / 'link.log')
+        normalize_output_case(output)
         pe_imports(output.read_bytes())
         require(snapshot(ROOT, folders, extras, config)[0] == fingerprint, 'Source changed during build; installation cancelled. Run ./build.sh again.')
         require(all(obj.is_file() and obj.stat().st_size for _, _, obj in units), 'A client object is missing')
@@ -302,7 +342,8 @@ def build(args, vc, sdk, sdk_version, ft, backend, boost_source, sources, ft_sou
         print(f'Linked: {output}', flush=True)
     if not args.no_install:
         drive = Path(os.getenv('SIXBOX_PROTON_DRIVE', str(Path.home() / '.local/share/Steam/steamapps/compatdata/440/pfx/drive_c'))).expanduser()
-        receipt = install(output, drive / 'Amalgamx64ReleaseFreetypeAVX2.dll', out / 'backups')
+        receipt = install(output, drive / 'SixBoxx64ReleaseFreetypeAVX2.dll', out / 'backups')
+        install_launchers(drive, out / 'backups')
         receipt['fingerprint'] = fingerprint
         (out / 'installed.json').write_text(json.dumps(receipt, indent=2))
     print(f'Done. DLL: {output}\nSHA256: {digest(output)}', flush=True)

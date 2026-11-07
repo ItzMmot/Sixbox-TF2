@@ -30,7 +30,7 @@ jobs:
         shell: pwsh
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'nightly') }}
-      RELEASE_NAME: Sixboxx64ReleaseFreetypeAVX2
+      RELEASE_NAME: SixBoxx64ReleaseFreetypeAVX2
 
     steps:
       - name: Check out build source
@@ -84,7 +84,7 @@ jobs:
 
       - name: Restore Boost
         run: |
-          nuget restore Unibox.sln -NonInteractive
+          nuget restore SixBox.sln -NonInteractive
           if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
 
       - name: Build FreeType and AVX2 DLL
@@ -93,7 +93,7 @@ jobs:
       - name: Save release bundle
         uses: actions/upload-artifact@v7
         with:
-          name: Sixbox-FreeType-AVX2-${{ env.RELEASE_TAG }}
+          name: SixBox-FreeType-AVX2-${{ env.RELEASE_TAG }}
           path: output/release/*
           if-no-files-found: error
 
@@ -108,7 +108,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:RELEASE_TAG @assets --clobber
           } else {
-            $options = @('--verify-tag', '--title', "Sixbox TF2 $env:RELEASE_TAG (FreeType AVX2)", '--generate-notes')
+            $options = @('--verify-tag', '--title', "SixBox TF2 $env:RELEASE_TAG (FreeType AVX2)", '--generate-notes')
             if ($env:RELEASE_TAG -match '-') { $options += '--prerelease' }
             gh release create $env:RELEASE_TAG @assets @options
           }
@@ -144,15 +144,15 @@ jobs:
           Commit: $env:GITHUB_SHA
           Build: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
 
-          Download Sixboxx64ReleaseFreetypeAVX2.dll below. Third-party licenses and SHA256 checksums are included.
+          Download SixBoxx64ReleaseFreetypeAVX2.dll below. Third-party licenses and SHA256 checksums are included.
           "@ | Set-Content $notes -Encoding utf8
           $assets = @(Get-ChildItem output/release -File | ForEach-Object FullName)
           gh release view nightly *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload nightly @assets --clobber
             if ($LASTEXITCODE -ne 0) { throw 'Nightly asset upload failed.' }
-            gh release edit nightly --title 'Sixbox TF2 Nightly (FreeType AVX2)' --notes-file $notes --prerelease --latest=false
+            gh release edit nightly --title 'SixBox TF2 Nightly (FreeType AVX2)' --notes-file $notes --prerelease --latest=false
           } else {
-            gh release create nightly @assets --verify-tag --title 'Sixbox TF2 Nightly (FreeType AVX2)' --notes-file $notes --prerelease --latest=false
+            gh release create nightly @assets --verify-tag --title 'SixBox TF2 Nightly (FreeType AVX2)' --notes-file $notes --prerelease --latest=false
           }
           if ($LASTEXITCODE -ne 0) { throw 'Nightly release publication failed.' }

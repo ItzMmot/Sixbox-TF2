@@ -8,7 +8,7 @@ import re
 import struct
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / 'Unibox/src/Features/Visuals/Aura/AuraShader.h'
+SOURCE = ROOT / 'SixBox/src/Features/Visuals/Aura/AuraShader.h'
 OUTPUT = SOURCE.with_name('AuraBytecode.h')
 MODES = 16
 

@@ -1,5 +1,5 @@
 // tests/menu_background_test.cpp — MenuBackground layout, Gaussian blur and alpha.
-#include "../Unibox/src/Features/ImGui/Background/BackgroundPolicy.h"
+#include "../SixBox/src/Features/ImGui/Background/BackgroundPolicy.h"
 #include <cassert>
 #include <limits>
 #include <cstdlib>

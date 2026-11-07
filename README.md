@@ -1,13 +1,13 @@
 <div align="center">
 
-# SIXBOX
+# SixBox · 6box
 
 **Unibox is for maggots.**
 
 *Jump higher. Glow harder. Blame the resolver.*
 
 [![Discord](https://img.shields.io/badge/Discord-join_the_larp-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/mUYUBqvVPH)
-[![Download](https://img.shields.io/badge/Download-FreeType_AVX2-C48A59?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ItzMmot/Sixbox-TF2/releases/download/nightly/Sixboxx64ReleaseFreetypeAVX2.dll)
+[![Download](https://img.shields.io/badge/Download-FreeType_AVX2-C48A59?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ItzMmot/Sixbox-TF2/releases/download/nightly/SixBoxx64ReleaseFreetypeAVX2.dll)
 [![Releases](https://img.shields.io/badge/Releases-acquire_power-C48A59?style=for-the-badge&logo=github&logoColor=white)](https://github.com/ItzMmot/Sixbox-TF2/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/ItzMmot/Sixbox-TF2/release-freetype-avx2.yml?branch=master&style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/ItzMmot/Sixbox-TF2/actions/workflows/release-freetype-avx2.yml)
 

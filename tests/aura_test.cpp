@@ -12,7 +12,7 @@
 #include <thread>
 // Regression: NetVars includes Windows.h before Types.h without NOMINMAX.
 #define min(a,b) windows_min_macro_must_not_expand(a,b)
-#include "../Unibox/src/Features/Visuals/Aura/AuraPolicy.h"
+#include "../SixBox/src/Features/Visuals/Aura/AuraPolicy.h"
 #undef min
 static size_t allocations=0;
 void* operator new(size_t size) {++allocations;if(auto* p=std::malloc(size))return p;throw std::bad_alloc();}
