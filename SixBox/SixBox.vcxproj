@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="DebugAVX2|x64">
@@ -549,7 +549,11 @@
     <ClCompile Include="src\Features\Visuals\Glow\Glow.cpp" />
     <ClCompile Include="src\Features\Visuals\Aura\Aura.cpp" />
     <ClCompile Include="src\Features\Visuals\JumpCoach\JumpCoach.cpp" />
+    <ClCompile Include="src\Features\Visuals\Sandevistan\Sandevistan.cpp" />
     <ClCompile Include="src\Features\Visuals\SkinChanger\SkinChanger.cpp" />
+    <ClCompile Include="src\Features\Visuals\Karaoke\Karaoke.cpp" />
+    <ClCompile Include="src\Features\Visuals\Karaoke\KaraokeGlass.cpp" />
+    <ClCompile Include="src\Features\Visuals\Karaoke\KaraokeText.cpp" />
     <ClCompile Include="src\Features\Visuals\Groups\Groups.cpp" />
     <ClCompile Include="src\Features\Visuals\PlayerConditions\PlayerConditions.cpp" />
     <ClCompile Include="src\Features\Visuals\Materials\Materials.cpp" />
@@ -645,6 +649,7 @@
     <ClCompile Include="src\Hooks\CTFRagdoll_CreateTFRagdoll.cpp" />
     <ClCompile Include="src\Hooks\CTFWeaponBase_CalcIsAttackCritical.cpp" />
     <ClCompile Include="src\Hooks\CTFWeaponBase_GetShootSound.cpp" />
+    <ClCompile Include="src\Hooks\CTFWeaponBase_Deploy.cpp" />
     <ClCompile Include="src\Hooks\CThirdPersonManager_Update.cpp" />
     <ClCompile Include="src\Hooks\CViewRender_DrawUnderwaterOverlay.cpp" />
     <ClCompile Include="src\Hooks\CViewRender_LevelInit.cpp" />
@@ -820,12 +825,27 @@
     <ClInclude Include="src\Features\Visuals\Aura\AuraShader.h" />
     <ClInclude Include="src\Features\Visuals\Aura\AuraTexture.h" />
     <ClInclude Include="src\Features\Visuals\JumpCoach\JumpCoach.h" />
+    <ClInclude Include="src\Features\Visuals\Sandevistan\Sandevistan.h" />
+    <ClInclude Include="src\Features\Visuals\Sandevistan\TrailPolicy.h" />
     <ClInclude Include="src\Features\Visuals\JumpCoach\CoachPolicy.h" />
     <ClInclude Include="src\Features\Visuals\JumpCoach\PathSmoothing.h" />
     <ClInclude Include="src\Features\Visuals\Aura\AuraBytecode.h" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\SkinChanger.h" />
+    <ClInclude Include="src\Features\Visuals\Karaoke\KaraokeGlassBytecode.h" />
+    <ClInclude Include="src\Features\Visuals\Karaoke\KaraokeGlass.h" />
+    <ClInclude Include="src\Features\Visuals\Karaoke\KaraokeModel.h" />
+    <ClInclude Include="src\Features\Visuals\Karaoke\KaraokeGeometry.h" />
+    <ClInclude Include="src\Features\Visuals\Karaoke\KaraokeText.h" />
+    <ClInclude Include="src\Features\Visuals\Karaoke\Karaoke.h" />
+    <ClInclude Include="src\Features\Visuals\SkinChanger\InventoryClasses.h" />
+    <ClInclude Include="src\Features\Visuals\SkinChanger\InventoryWeaponPolicy.h" />
+    <ClInclude Include="src\Features\Visuals\SkinChanger\WeaponModelPolicy.h" />
+    <ClInclude Include="src\Features\Visuals\SkinChanger\WearableLoadoutPolicy.h" />
+    <ClInclude Include="src\Features\Visuals\SkinChanger\GoldKillPolicy.h" />
+    <ClInclude Include="src\Features\Visuals\SkinChanger\SkinProfile.h" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\SkinData.h" />
     <ClInclude Include="src\Features\Visuals\Groups\Groups.h" />
+    <ClInclude Include="src\Features\Visuals\Groups\GroupSnapshots.h" />
     <ClInclude Include="src\Features\Visuals\PlayerConditions\PlayerConditions.h" />
     <ClInclude Include="src\Features\Visuals\OffscreenArrows\OffscreenArrows.h" />
     <ClInclude Include="src\Features\Visuals\SpectatorList\SpectatorList.h" />

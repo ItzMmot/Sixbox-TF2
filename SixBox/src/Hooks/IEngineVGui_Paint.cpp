@@ -19,6 +19,7 @@
 #include "../Features/Debug/Debug.h"
 #ifndef TEXTMODE
 #include "../Features/Visuals/SkinChanger/SkinChanger.h"
+#include "../Features/Visuals/Karaoke/Karaoke.h"
 #endif
 
 MAKE_HOOK(IEngineVGui_Paint, U::Memory.GetVirtual(I::EngineVGui, 14), void,
@@ -50,6 +51,9 @@ MAKE_HOOK(IEngineVGui_Paint, U::Memory.GetVirtual(I::EngineVGui, 14), void,
 	{
 		H::Draw.UpdateScreenSize();
 		H::Draw.UpdateW2SMatrix();
+#ifndef TEXTMODE
+        F::Karaoke.CacheWorld();
+#endif
 
 		auto pLocal = H::Entities.GetLocal();
 

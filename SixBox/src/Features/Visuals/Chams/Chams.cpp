@@ -23,6 +23,7 @@ static inline bool GetDistanceThing(float flDistance, const ChamsMaterial_t& tMa
 void CChams::Reset()
 {
 	m_vEntities.clear();
+	m_groupOwner.reset();
 	m_mEntities.clear();
 	m_tOriginalColor = {};
 	m_flOriginalBlend = 1.f;
@@ -166,6 +167,7 @@ void CChams::DrawModel(CBaseEntity* pEntity, const Chams_t& tChams, IMatRenderCo
 void CChams::Store(CTFPlayer* pLocal)
 {
 	m_vEntities.clear();
+	m_groupOwner=F::Groups.RuntimeSnapshot();
 	if (!pLocal || !F::Groups.GroupsActive())
 		return;
 

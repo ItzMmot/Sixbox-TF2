@@ -4,6 +4,7 @@
 #include "../../Simulation/ProjectileSimulation/ProjectileSimulation.h"
 
 #include <algorithm>
+#include "../../Binds/Binds.h"
 
 static inline bool ShouldTargetTeam(Group_t& tGroup, int iBit, CBaseEntity* pEntity, CTFPlayer* pLocal)
 {
@@ -412,6 +413,13 @@ static inline bool ShouldTarget(Group_t& tGroup, CBaseEntity* pEntity, CTFPlayer
 
 void CGroups::Store(CTFPlayer* pLocal)
 {
+    // Only the game owner switches runtime generations, before dependent Store
+    // calls. UI changes never invalidate cached group or material pointers.
+    {
+        std::scoped_lock lock(F::Binds.m_mMutex);
+        m_activeMask=static_cast<unsigned int>(Vars::ESP::ActiveGroups.Value);
+        m_runtime=m_snapshots.Acquire();
+    }
 	m_mEntities.clear();
 	m_mModels.clear();
 	if (!GroupsActive())
@@ -460,11 +468,11 @@ bool CGroups::GetGroup(CBaseEntity* pEntity, CTFPlayer* pLocal, Group_t*& pGroup
 	if (!GroupsActive())
 		return false;
 
-	for (int i = static_cast<int>(std::min(m_vGroups.size(), size_t(MAX_GROUPS))) - 1; i >= 0; i--) // reverse so back groups have higher priority
+	for (int i = static_cast<int>(std::min(m_runtime->size(), size_t(MAX_GROUPS))) - 1; i >= 0; i--) // reverse so back groups have higher priority
 	{
-		auto& tGroup = m_vGroups[i];
+		auto& tGroup = (*m_runtime)[i];
 
-		if (!(static_cast<unsigned int>(Vars::ESP::ActiveGroups.Value) & (1u << i)))
+		if (!(m_activeMask & (1u << i)))
 			continue;
 
 		if (!ShouldTarget(tGroup, pEntity, pLocal, bModels))
@@ -482,11 +490,11 @@ bool CGroups::GetGroup(int iType, Group_t*& pGroup, CBaseEntity* pEntity)
 	if (!GroupsActive())
 		return false;
 
-	for (int i = static_cast<int>(std::min(m_vGroups.size(), size_t(MAX_GROUPS))) - 1; i >= 0; i--) // reverse so back groups have higher priority
+	for (int i = static_cast<int>(std::min(m_runtime->size(), size_t(MAX_GROUPS))) - 1; i >= 0; i--) // reverse so back groups have higher priority
 	{
-		auto& tGroup = m_vGroups[i];
+		auto& tGroup = (*m_runtime)[i];
 
-		if (!(static_cast<unsigned int>(Vars::ESP::ActiveGroups.Value) & (1u << i)))
+		if (!(m_activeMask & (1u << i)))
 			continue;
 
 		if (!(tGroup.m_iTargets & iType) || pEntity && (tGroup.m_iConditions & ConditionsEnum::Dormant ? !pEntity->IsDormant() : pEntity->IsDormant()))
@@ -504,11 +512,11 @@ bool CGroups::GetGroup(int iType)
 	if (!GroupsActive())
 		return false;
 
-	for (int i = static_cast<int>(std::min(m_vGroups.size(), size_t(MAX_GROUPS))) - 1; i >= 0; i--) // reverse so back groups have higher priority
+	for (int i = static_cast<int>(std::min(m_runtime->size(), size_t(MAX_GROUPS))) - 1; i >= 0; i--) // reverse so back groups have higher priority
 	{
-		auto& tGroup = m_vGroups[i];
+		auto& tGroup = (*m_runtime)[i];
 
-		if (!(static_cast<unsigned int>(Vars::ESP::ActiveGroups.Value) & (1u << i)))
+		if (!(m_activeMask & (1u << i)))
 			continue;
 
 		if (!(tGroup.m_iTargets & iType))
@@ -543,11 +551,13 @@ Color_t CGroups::GetColor(CBaseEntity* pEntity, Group_t* pGroup)
 
 bool CGroups::GroupsActive()
 {
-	return Vars::ESP::ActiveGroups.Value && !m_vGroups.empty();
+	return m_activeMask && m_runtime && !m_runtime->empty();
 }
 
 void CGroups::Move(int i1, int i2)
 {
-	m_vGroups.insert(std::next(m_vGroups.begin(), i2 + (i1 < i2 ? 1 : 0)), m_vGroups[i1]);
-	m_vGroups.erase(std::next(m_vGroups.begin(), i1 + (i1 > i2 ? 1 : 0)));
+    const int count=int(m_vGroups.size());
+    if(i1<0||i2<0||i1>=count||i2>=count||i1==i2) return;
+    if(i1<i2) std::rotate(m_vGroups.begin()+i1,m_vGroups.begin()+i1+1,m_vGroups.begin()+i2+1);
+    else std::rotate(m_vGroups.begin()+i2,m_vGroups.begin()+i1,m_vGroups.begin()+i1+1);
 }

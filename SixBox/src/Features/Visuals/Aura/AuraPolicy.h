@@ -55,6 +55,7 @@ namespace Aura
 #define AURA_DECLARE(n,l,d,lo,hi,step) float n = d;
         AURA_FLOAT_SETTINGS(AURA_DECLARE)
 #undef AURA_DECLARE
+        bool operator==(const Settings&) const = default;
         void Sanitize()
         {
             Mode = std::clamp(Mode,0,Modes-1); Quality = std::clamp(Quality,0,2); Coverage = std::clamp(Coverage,0,2);

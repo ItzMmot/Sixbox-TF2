@@ -20,6 +20,7 @@
 #include "../Features/ImGui/RenderSync.h"
 #include "../Features/ImGui/Background/MenuBackground.h"
 #include "../Features/Visuals/Aura/Aura.h"
+#include "../Features/Visuals/Karaoke/Karaoke.h"
 #endif
 #include "../SDK/Events/Events.h"
 #ifdef TEXTMODE
@@ -206,13 +207,10 @@ void CCore::Load()
 		H::Fonts.Reload();
 	}
 #endif
-	const auto sVisualConfig = F::Configs.m_sCurrentVisuals;
 	{
-		SDK::CInitTimingScope tConfig("Core.Load config");
-		F::Configs.LoadConfig(F::Configs.m_sCurrentConfig, false);
-		if (!sVisualConfig.empty())
-			F::Configs.LoadVisual(sVisualConfig, false);
-	}
+        SDK::CInitTimingScope config("Core.Load config");
+        F::Configs.LoadStartup();
+    }
 	F::TelemetryBlocker.Initialize();
 	I::EngineClient->ClientCmd_Unrestricted("exec catexec");
 	SDK::Output("SixBox", std::format("Loaded (dxlevel {})", SDK::GetActiveDXLevel()).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
@@ -262,6 +260,7 @@ void CCore::Unload()
 #ifndef TEXTMODE
 	m_bFailed2 = !U::Hooks.Unload() || m_bFailed2;
 	F::SkinChanger.Unload();
+    F::Karaoke.Shutdown();
 	F::CaptureOverlay.Shutdown();
 #endif
 	U::BytePatches.Unload();

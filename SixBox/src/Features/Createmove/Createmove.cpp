@@ -2,6 +2,9 @@
 #include "../Aimbot/SpyKnife/SpyKnife.h"
 #ifndef TEXTMODE
 #include "../Visuals/JumpCoach/JumpCoach.h"
+#ifndef TEXTMODE
+#include "../Visuals/Sandevistan/Sandevistan.h"
+#endif
 #endif
 #include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
 #include "../Aimbot/AutoRocketJump/AutoRocketJump.h"
@@ -139,6 +142,14 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 		F::Visuals.LocalAnimations(pLocal, pWeapon, pCmd);
 #endif
 	}
+#ifndef TEXTMODE
+    const int trailKind=F::Ticks.m_bWarp?Sandevistan::Warp:F::Ticks.m_bDoubletap?Sandevistan::Doubletap:Sandevistan::None;
+    F::Sandevistan.MarkCommand(pLocal,pCmd,trailKind,std::max(0,F::Ticks.m_iShiftedTicks-F::Ticks.m_iShiftedGoal));
+    // Capture while this command's predicted player state is still active.
+    // Engine RunSimulation may skip already acknowledged commands on localhost.
+    if(F::EnginePrediction.m_bInPrediction)
+        F::Sandevistan.CapturePrediction(pLocal,pCmd,I::GlobalVars->curtime);
+#endif
 	F::EnginePrediction.End(pLocal, pCmd);
 #ifndef TEXTMODE
     F::JumpCoach.Update(pLocal,pWeapon,pCmd);

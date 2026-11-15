@@ -402,3 +402,6 @@ NUL
 Thumbs.db
 Desktop.ini
 .pytest_cache/
+
+# Local UI window layout
+/imgui.ini

@@ -1,5 +1,6 @@
 #pragma once
 #include "../../../SDK/SDK.h"
+#include "../Groups/Groups.h"
 
 Enum(Model, Visible, Occluded);
 
@@ -25,6 +26,7 @@ private:
 		int m_iFlags = 0;
 	};
 	std::vector<ChamsInfo_t> m_vEntities = {};
+	CGroups::Snapshots::Snapshot m_groupOwner;
 
 	Color_t m_tOriginalColor = {};
 	float m_flOriginalBlend = 1.f;

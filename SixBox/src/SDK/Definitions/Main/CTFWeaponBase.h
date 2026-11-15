@@ -207,6 +207,9 @@ public:
 		return reinterpret_cast<void*>(uintptr_t(this) + nOffset);
 	};
 
+    // Verified in the current x64 C_TFShovel vtable; shared CTFWeaponBase slots.
+    VIRTUAL_ARGS(GetWeaponViewModel, const char*, 319, (int index), this, index);
+    VIRTUAL(GetWorldModelIndex, int, 369, this);
 	VIRTUAL(GetSlot, int, 331, this);
 	VIRTUAL(GetWeaponID, int, 383, this);
 	VIRTUAL(GetDamageType, int, 384, this);

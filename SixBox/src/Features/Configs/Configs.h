@@ -10,6 +10,7 @@ class CConfigs
 {
 public:
 	CConfigs();
+    void LoadStartup();
 
 	bool SaveConfig(const std::string& sConfigName, bool bNotify = true);
 	bool LoadConfig(const std::string& sConfigName, bool bNotify = true);
@@ -31,6 +32,8 @@ public:
 	std::string m_sCurrentConfig = "default";
 	std::string m_sCurrentVisuals = "default";
 	std::string m_sCurrentSkins = "default";
+    bool m_bUseSkinProfile=true;
+    bool m_bConfigHasSkins=false;
 	std::string m_sConfigPath;
 	std::string m_sVisualsPath;
 	std::string m_sSkinsPath;

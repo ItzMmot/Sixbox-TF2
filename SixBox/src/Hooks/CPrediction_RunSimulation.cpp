@@ -2,6 +2,9 @@
 
 #include "../Features/EnginePrediction/EnginePrediction.h"
 #include "../Features/Ticks/Ticks.h"
+#ifndef TEXTMODE
+#include "../Features/Visuals/Sandevistan/Sandevistan.h"
+#endif
 
 MAKE_SIGNATURE(CPrediction_RunSimulation, "client.dll", "48 83 EC 38 4C 8B 44", 0x0);
 
@@ -41,5 +44,8 @@ MAKE_HOOK(CPrediction_RunSimulation, S::CPrediction_RunSimulation(), void,
 
 	F::EnginePrediction.AdjustPlayers(localPlayer);
 	CALL_ORIGINAL(rcx, current_command, curtime, cmd, localPlayer);
+#ifndef TEXTMODE
+    F::Sandevistan.CapturePrediction(localPlayer,cmd,curtime);
+#endif
 	F::EnginePrediction.RestorePlayers();
 }

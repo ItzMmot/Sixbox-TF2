@@ -7,14 +7,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install config test dependency
+        run: sudo apt-get update && sudo apt-get install -y libboost-dev
+      - name: Install audio analysis test dependency
+        run: python3 -m pip install numpy
       - name: Validate local build cache and installation
-        run: python3 tests/build_local_dll_test.py
+        run: |
+          python3 tests/build_local_dll_test.py
+          python3 tests/skin_config_test.py
+          python3 tests/gold_kill_integration_test.py
+          python3 tests/inventory_owned_weapon_test.py
+          python3 tests/inventory_weapon_models_test.py
+          python3 tests/inventory_wearables_test.py
+          python3 tests/karaoke_bridge_test.py
+          python3 tests/karaoke_audio_test.py
       - name: Validate aimbot policies and command schedules
         shell: bash
         run: |
           set -euo pipefail
-          for test in aim_policy burst_planner seam_geometry splash_window animation_timeline sticky_search auto_trolldier spy_knife jump_coach jump_coach_smoothing menu_background material_registry identity_migration; do
-            g++ -std=c++20 -O2 -pthread -Wall -Wextra -Werror "tests/${test}_test.cpp" -o "${RUNNER_TEMP}/${test}_test"
+          for test in aim_policy burst_planner seam_geometry splash_window animation_timeline sticky_search auto_trolldier spy_knife jump_coach jump_coach_smoothing menu_background material_registry identity_migration group_snapshots inventory_classes inventory_weapon_policy weapon_model_policy gold_kill_policy karaoke karaoke_geometry sandevistan; do
+            g++ -std=c++20 -O2 -I SixBox/include -pthread -Wall -Wextra -Werror "tests/${test}_test.cpp" -o "${RUNNER_TEMP}/${test}_test"
             "${RUNNER_TEMP}/${test}_test"
           done
 
@@ -37,7 +49,9 @@ jobs:
       run: nuget restore
 
     - name: Validate Aura shader sources
-      run: python .github/scripts/build-aura-shaders.py --check
+      run: |
+        python .github/scripts/build-aura-shaders.py --check
+        python .github/scripts/build-karaoke-shaders.py --check
 
     - name: Build
       working-directory: ${{ env.GITHUB_WORKSPACE }}

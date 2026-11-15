@@ -50,7 +50,7 @@ The original model is still drawn normally underneath the effect.
 | Flicker / Pulse / Swirl | Brightness variation and procedural swirling |
 | Maximum distance | World model range in Source HU; excludes first-person models |
 | Quality | Three, four or five noise octaves |
-| Visible sources only | Shared scene-depth testing, with a source-visibility fallback when depth cannot be shared |
+| Render through walls | Ignore wall occlusion; disabled by default. When off, use shared scene depth or the source-visibility fallback |
 | Preset colors / Use group color | Mode palette or the group's base ESP color; group color wins |
 | Core color / Edge color | Custom colors and alpha when both overrides are off |
 
@@ -103,7 +103,9 @@ an individual fluid simulation for every model. More groups and high resolution
 increase GPU memory and rendering cost. Eight RGBA masks use approximately
 63 MiB at 1920×1080, plus two half-resolution blur textures and driver overhead.
 
-Visible sources only affects mask creation. Its trace fallback checks the source
+Render through walls controls mask occlusion through the existing inverse
+`VisibleOnly` config field, so older profiles retain their behavior. Visibility
+filtering affects mask creation. Its trace fallback checks the source
 center and does not clip partially hidden models pixel by pixel. The final surrounding coating is a
 screen-space effect, so it may overlap adjacent foreground edges. A geometry
 submission behind a wall is required even when depth testing is disabled; Aura

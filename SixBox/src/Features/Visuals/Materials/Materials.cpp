@@ -3,6 +3,7 @@
 #include "../Glow/Glow.h"
 #ifndef TEXTMODE
 #include "../Aura/Aura.h"
+#include "../Sandevistan/Sandevistan.h"
 #endif
 #include "../CameraWindow/CameraWindow.h"
 #include "../../Configs/Configs.h"
@@ -398,6 +399,7 @@ void CMaterials::LoadMaterials()
 		F::Glow.Initialize();
 #ifndef TEXTMODE
         F::Aura.InitializeMaterials();
+        F::Sandevistan.InitializeMaterials();
 #endif
 		F::CameraWindow.Initialize();
 		if (bDx9Shaders)
@@ -460,6 +462,7 @@ void CMaterials::UnloadMaterials()
 
 	F::Glow.Unload();
 #ifndef TEXTMODE
+    F::Sandevistan.ShutdownMaterials();
     F::Aura.ShutdownMaterials();
 #endif
 	F::CameraWindow.Unload();

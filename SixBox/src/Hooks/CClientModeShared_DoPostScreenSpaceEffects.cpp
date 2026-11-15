@@ -2,6 +2,9 @@
 #include "../Features/Aimbot/SpyKnife/SpyKnife.h"
 #include "../Features/Visuals/Aura/Aura.h"
 #include "../Features/Visuals/JumpCoach/JumpCoach.h"
+#ifndef TEXTMODE
+#include "../Features/Visuals/Sandevistan/Sandevistan.h"
+#endif
 
 #include "../Features/Visuals/Chams/Chams.h"
 #include "../Features/Visuals/Glow/Glow.h"
@@ -39,6 +42,7 @@ MAKE_HOOK(CClientModeShared_DoPostScreenSpaceEffects, U::Memory.GetVirtual(I::Cl
 	if (I::EngineVGui->IsGameUIVisible() || !F::Materials.m_bLoaded)
 		return CALL_ORIGINAL(rcx, pSetup);
 
+    F::Sandevistan.RenderWorld(pSetup);
 	F::Chams.RenderMain();
 	F::Glow.RenderFirst();
     if (pSetup) F::Aura.SetWorldView(*pSetup);

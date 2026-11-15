@@ -1,7 +1,11 @@
 #pragma once
 #include "../../../SDK/SDK.h"
+#include "WearableLoadoutPolicy.h"
 
 #include <mutex>
+#include "SkinProfile.h"
+#include "InventoryClasses.h"
+#include "InventoryWeaponPolicy.h"
 #include <array>
 #include <map>
 #include <string>
@@ -14,6 +18,7 @@ class CEconItem;
 struct ItemInfo_t
 {
 	uint16_t iDef = 0;
+    uint32_t uClassMask = 0;
 	std::string sName;
 	std::string sClass;
 	std::string sImage;
@@ -26,41 +31,9 @@ struct ItemInfo_t
 	int iPaintColor2 = -1;
 	bool bPaintable = false;
 	bool bHat = false;
+    bool bCosmetic = false;
 };
 
-struct BackpackItem_t
-{
-	uint32_t uSerial = 0;
-	uint16_t iDef = 0;
-	int iUnusual = 0;
-	int iPaintColor = -1;
-	int iPaintColor2 = -1;
-	int iStyle = 0;
-};
-
-struct Skin_t
-{
-	int iPaintKit = -1;
-	int iWear = 0;
-	int iSeed = 0;
-	int iQuality = -1;
-	int iStatTrak = -1;
-	int iKillEffect = -1;
-	int iPaintColor = -1;
-	int iBotkiller = 0;
-	bool bAustralium = false;
-	bool bFestive = false;
-	int iKillstreak = 0;
-	int iSheen = 0;
-	int iUnusual = 0;
-
-	bool Empty() const
-	{
-		return iPaintKit < 0 && iQuality < 0 && !bAustralium && !bFestive && iKillstreak <= 0 && iSheen <= 0 && iUnusual <= 0 && iBotkiller <= 0 && iStatTrak < 0 && iKillEffect <= 0 && iPaintColor < 0;
-	}
-
-	bool operator==(const Skin_t&) const = default;
-};
 
 enum EWeaponUnusual
 {
@@ -113,6 +86,7 @@ class CSkinChanger
 	struct Wearable_t
 	{
 		CHandle<CEconWearable> hEntity = {};
+        uint64_t uItemID = 0;
 		int iDef = -1;
 		int iClass = -1;
 		int iTeam = -1;
@@ -126,7 +100,15 @@ class CSkinChanger
 		alignas(16) uint8_t aData[SIZE_OF_ITEMVIEW] = {};
 	};
 	std::array<Wearable_t, 19> m_aWearables = {};
-	std::array<CHandle<CEconWearable>, 8> m_aHiddenWearables = {};
+	struct HiddenWearable_t
+    {
+        CHandle<CEconWearable> hEntity;
+        CHandle<CTFPlayer> hOwner;
+        bool bWasHidden = false;
+    };
+    std::array<HiddenWearable_t,32> m_aHiddenWearables{};
+    WearableLoadoutPolicy::Selection m_tWearableSelection;
+    int m_iWearableClass=0,m_iWearableTeam=0;
 	std::array<LoadoutView_t, 19> m_aWearableViews = {};
 	uint64_t m_aWearableViewKey[19] = {};
 	bool m_aWearableViewBuilt[19] = {};
@@ -142,6 +124,8 @@ class CSkinChanger
 	void ScheduleRefresh();
 	int OriginalDef(CBaseEntity* pWeapon, int iHandle, int iCurrent) const;
 	void RunFrame();
+    void CacheGoldWeapons(CTFPlayer* local);
+    void FlushGoldRagdolls(bool force = false);
 	CTFPlayerInventory* GetLocalInventory() const;
 	void SyncInventory();
 	void ClearClientItems();
@@ -157,7 +141,7 @@ class CSkinChanger
 	void RestoreWeaponVisuals();
 	void ResetWearables(CTFPlayer* pLocal);
 	void RestoreHiddenWearables();
-	void HideReplacedWearables(CTFPlayer* pLocal, int iClass);
+	bool HideReplacedWearables(CTFPlayer* pLocal, int iClass);
 	void RemoveWearable(CTFPlayer* pLocal, Wearable_t& tWearable);
 	CEconItemView* GetWearableView(int iClass, int iSlot, int iTeam, int iDef, int iUnusual, int iPaintColor, int iPaintColor2, int iStyle);
 	CEconWearable* CreateWearable(CTFPlayer* pLocal, CEconItemView* pView, int iClass, int iTeam);
@@ -165,6 +149,9 @@ class CSkinChanger
 
 public:
 	void Apply();
+    void PrepareWeaponDeploy(CTFWeaponBase* weapon);
+    void GoldKillEvent(IGameEvent* event);
+    void CreateGoldRagdoll(CTFRagdoll* ragdoll, void(__fastcall* create)(void*));
 	void Service();
 	void CacheMenuInfo(CTFWeaponBase* pWeapon);
 	void OnLevelShutdown();
@@ -175,7 +162,7 @@ public:
 	bool IsClientItem(uint64_t uItemID);
 	void* GetClientSOCData(uint64_t uItemID);
 	bool OnSendMessage(void* pMessage);
-	uint64_t FindOwnedWeapon(uint64_t uClientItemID);
+	uint64_t FindOwnedWeapon(uint64_t uClientItemID, int iClass, int iSlot);
 	bool IsReplacedWearableItem(uint64_t uItemID);
 	void ApplyLocalLoadout(uint64_t uItemID, int iClass, int iSlot);
 	std::map<int, uint64_t> GetLoadout();
@@ -189,6 +176,8 @@ public:
 	void Clear();
 	std::unordered_map<int, Skin_t> GetSkins();
 	void SetSkins(std::unordered_map<int, Skin_t> mSkins);
+	SkinProfile_t GetProfile();
+	void SetProfile(SkinProfile_t profile);
 
 	void RequestFullUpdate();
 
@@ -206,6 +195,7 @@ public:
 
 	static const std::vector<ItemInfo_t>& GetItems();
 	static bool IsCatalogueLoading();
+    static uint64_t CatalogueRevision();
 
 	static int Key(int iDefIndex);
 	static const char* WeaponName(int iKey);

@@ -1926,7 +1926,7 @@ namespace ImGui
 				if (IsDividerEntry(sEntry))
 					continue;
 
-				vValues.push_back(iFlags & FDropdownEnum::Multi ? 1 << i : i);
+				vValues.push_back(iFlags & FDropdownEnum::Multi ? int(1u << i) : i);
 				i++;
 			}
 		}
@@ -1950,9 +1950,9 @@ namespace ImGui
 			{
 				for (int i = 0; i < MAX_GROUPS; i++)
 				{
-					bool bFound = *pVar & (1 << i) && std::find(vValues.begin(), vValues.end(), (1 << i)) != vValues.end();
+					bool bFound = *pVar & (1u << i) && std::find(vValues.begin(), vValues.end(), (1u << i)) != vValues.end();
 					if (!bFound)
-						*pVar &= ~(1 << i);
+						*pVar &= ~(1u << i);
 				}
 			}
 		}

@@ -1,5 +1,6 @@
 #pragma once
 #include "../../../SDK/SDK.h"
+#include "GroupSnapshots.h"
 
 Enum(Targets, Players = 1 << 0, Buildings = 1 << 1, Projectiles = 1 << 2, Ragdolls = 1 << 3, Objective = 1 << 4, NPCs = 1 << 5, Health = 1 << 6, Ammo = 1 << 7, Money = 1 << 8, Powerups = 1 << 9, Spellbook = 1 << 10, Bombs = 1 << 11, Gargoyle = 1 << 12, FakeAngle = 1 << 13, ViewmodelWeapon = 1 << 14, ViewmodelHands = 1 << 15, ESP = ~(Ragdolls | FakeAngle | ViewmodelWeapon | ViewmodelHands), Occluded = ~(ViewmodelWeapon | ViewmodelHands))
 Enum(Conditions, Enemy = 1 << 0, Team = 1 << 1, BLU = 1 << 2, RED = 1 << 3, Local = 1 << 4, Friends = 1 << 5, Party = 1 << 6, Priority = 1 << 7, Target = 1 << 8, Dormant = 1 << 9)
@@ -15,6 +16,7 @@ inline constexpr int MAX_GROUPS = sizeof(int) * 8;
 
 struct Group_t
 {
+	bool operator==(const Group_t&) const = default;
 	std::string m_sName = "";
 
 	Color_t m_tColor = {};
@@ -51,12 +53,23 @@ struct Group_t
 
 class CGroups
 {
+public:
+	using Snapshots=CGroupSnapshots<Group_t,MAX_GROUPS>;
 private:
+	Snapshots m_snapshots;
+	Snapshots::Snapshot m_runtime;
+	unsigned int m_activeMask=0;
 	std::unordered_map<CBaseEntity*, Group_t*> m_mEntities = {};
 	std::unordered_map<CBaseEntity*, Group_t*> m_mModels = {};
 
 public:
 	void Store(CTFPlayer* pLocal);
+    void Publish() {m_snapshots.Publish(m_vGroups);} // UI/config owner, under Binds mutex.
+    Snapshots::Snapshot RuntimeSnapshot() const {return m_runtime;}
+    const Snapshots::Storage& RuntimeGroups() const
+    {static const Snapshots::Storage empty;return m_runtime?*m_runtime:empty;}
+    unsigned int ActiveMask() const {return m_activeMask;}
+
 
 	bool GetGroup(CBaseEntity* pEntity, Group_t*& pGroup, bool bModels = true); // cached
 	const std::unordered_map<CBaseEntity*, Group_t*>& GetGroup(bool bModels = true);

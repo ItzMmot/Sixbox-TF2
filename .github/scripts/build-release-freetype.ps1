@@ -4,6 +4,8 @@ $root = (Resolve-Path "$PSScriptRoot/../..").Path
 Set-Location $root
 python .github/scripts/build-aura-shaders.py --check
 if ($LASTEXITCODE -ne 0) { throw 'Aura shader source/bytecode validation failed.' }
+python .github/scripts/build-karaoke-shaders.py --check
+if ($LASTEXITCODE -ne 0) { throw 'Karaoke shader source/bytecode validation failed.' }
 $deps = Join-Path $root '.builds/release'
 $freeTypeRoot = Join-Path $deps 'freetype-install'
 $backend = Join-Path $deps 'imgui/misc/freetype'

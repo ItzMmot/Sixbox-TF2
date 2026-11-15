@@ -1,6 +1,7 @@
 #include "Pages.h"
 #ifndef TEXTMODE
 #include "../Background/MenuBackground.h"
+#include "../../Visuals/Karaoke/Karaoke.h"
 #endif
 
 #ifndef TEXTMODE
@@ -737,6 +738,120 @@ static void VisualsView()
 	EndTable();
 }
 
+static void SandevistanSettings()
+{
+    std::scoped_lock lock(F::Binds.m_mMutex);
+    using namespace Vars::Visuals::Sandevistan;
+    if(Section("Sandevistan"))
+    {
+        FToggle(Enabled);FDropdown(Triggers);
+        FColorPicker(StartColor);FColorPicker(EndColor);
+        FTooltip("Oldest copy starts at Start color; newest copy ends at End color. Alpha is also interpolated.");
+        PushTransparent(!Enabled.Value);
+        FToggle(Reverse);FSlider(GradientBias);
+        FSlider(Copies);FSlider(Duration);FSlider(Opacity);
+        FSlider(FadeIn);FSlider(FadePower);FSlider(Stagger);
+        FSlider(MinSpacing);FSlider(StationarySpread);FSlider(Drift);FSlider(Scale);
+        FDropdown(Material);FToggle(ThroughWalls);FSlider(MinCameraDistance);FSlider(DrawBudget);
+        TextWrapped("Captures your predicted poses during actual warp/doubletap commands. Only visual; does not change movement or timing.");
+        PopTransparent();
+    }EndSection();
+    if(Section("Sandevistan first person"))
+    {
+        PushTransparent(!Enabled.Value);
+        FToggle(Viewmodel);
+        PushTransparent(!Viewmodel.Value);
+        FSlider(ViewCopies);FSlider(ViewSpread);FSlider(ViewOpacity);
+        TextWrapped("Echo direction follows camera turns and lateral movement; no fixed leftward offset.");
+        PopTransparent();PopTransparent();
+    }EndSection();
+    if(Section("Sandevistan screen"))
+    {
+        PushTransparent(!Enabled.Value);
+        FToggle(SpeedLines);PushTransparent(!SpeedLines.Value);
+        FSlider(LineCount);FSlider(ScreenStrength);
+        PopTransparent();PopTransparent();
+    }EndSection();
+}
+
+static void KaraokeSettings()
+{
+    std::scoped_lock lock(F::Binds.m_mMutex);
+    using namespace Vars::Visuals::World::Karaoke;
+    if(Section("Karaoke"))
+    {
+        FToggle(Enabled);FDropdown(Source);FDropdown(Provider);FDropdown(Outputs);
+        FTooltip("Lyrics: Spicy -> LRCLIB -> Musixmatch, or LRCLIB -> Musixmatch. LRCLIB needs no key.");
+        if(Provider.Value==1)
+        {
+            if(FInputText("Spicy Lyrics API key",SpicyKey.Value,GetContentRegionAvail().x,ImGuiInputTextFlags_Password))SpicyKey[DEFAULT_BIND]=SpicyKey.Value;
+            TextWrapped("Get a key: create your personal application at developers.spicylyrics.org, enable client access for native clients (requests without Origin), then paste the client key here. A personal local-backend key is also accepted.");
+            if(FButton("Spicy developer dashboard"))ShellExecuteA(nullptr,"open","https://developers.spicylyrics.org/dashboard/applications",nullptr,nullptr,SW_SHOWNORMAL);
+        }
+        if(FInputText("Musixmatch fallback API key",MusixmatchKey.Value,GetContentRegionAvail().x,ImGuiInputTextFlags_Password))MusixmatchKey[DEFAULT_BIND]=MusixmatchKey.Value;
+        FTooltip("Optional final fallback. Register at developer.musixmatch.com/signup. The key's plan controls access to timed/full lyrics.");
+        TextWrapped("Keys are saved in the config. Remove them before sharing it. On Linux/Proton, run scripts/karaoke/install.py once. Open ClickGUI to use the HUD controls.");
+        FToggle(Controls);FToggle(HudLyrics);FToggle(Credits);
+        FTooltip("Required Spicy/Musixmatch attribution remains visible while those lyrics are shown.");
+    }EndSection();
+    if(Section("Karaoke text"))
+    {
+        FDropdown(Font);FSlider(FontSize);FSlider(LineSpacing);FSlider(Context);FSlider(Offset);
+        FSlider(Smoothing);FSlider(ActiveScale);FDropdown(OldText);FSlider(OldStrength);
+        if(OldText.Value==2){FSlider(FallDistance);FSlider(FallTime);}
+        if(OldText.Value==3)
+        {
+            FDropdown(CrumbleOrder);FSlider(CrumbleStagger);FSlider(CrumbleDuration);FSlider(CrumbleDistance);
+            FSlider(CrumbleSpread);FSlider(CrumbleSpin);FSlider(CrumbleDepth);FSlider(CrumbleGravity);
+            FTooltip("Each Unicode letter falls independently. Combining marks move with their letter. Stagger spans at most 3 seconds per line; playback pause/seek also pauses/rewinds the effect.");
+        }
+        FSlider(Opacity);FSlider(Glow);FSlider(Shadow);
+        FColorPicker(TextColor,FColorPickerEnum::Left);FColorPicker(Highlight,FColorPickerEnum::Right);
+        FSlider(TextX);FSlider(TextY);
+    }EndSection();
+    if(Section("Karaoke text glass"))
+    {
+        FDropdown(TextGlass);
+        FTooltip("Independent from the HUD material. Applies to lyrics in 2D, world-space 3D and the HUD.");
+        if(TextGlass.Value)
+        {
+            FSlider(TextBlur);FSlider(TextFrost);FSlider(TextEdge);FSlider(TextTint);FSlider(TextGlassOpacity);
+            if(TextGlass.Value==2){FSlider(TextRefraction);FSlider(TextChromatic);}
+        }
+    }EndSection();
+    if(Section("Karaoke HUD"))
+    {
+        FSlider(HudX);FSlider(HudY);FSlider(HudWidth);FDropdown(Glass);
+        FColorPicker(PanelColor,FColorPickerEnum::Full);FSlider(PanelOpacity);FSlider(Rounding);
+        if(Glass.Value){FSlider(Blur);FSlider(Frost);FSlider(EdgeGlow);}
+        if(Glass.Value==2){FSlider(Refraction);FSlider(Zoom);FSlider(Chromatic);}
+    }EndSection();
+    if(Section("Karaoke visualizer"))
+    {
+        FToggle(Visualizer);FDropdown(VisualizerMode);
+        FTooltip("Always: alongside lyrics. No text: only when lyrics are unavailable. Captures only the selected music stream; ambiguous browser streams stay silent.");
+        FSlider(VisualizerHeight);FSlider(VisualizerGain);FSlider(VisualizerReaction);
+        FSlider(VisualizerGlow);FSlider(VisualizerParticles);FSlider(VisualizerPulse);
+        FColorPicker(VisualizerColor,FColorPickerEnum::Full);
+        TextWrapped("Breakcore: fast transients, stereo spectrum and drum-driven particles. Linux requires parec/pactl and python3-numpy. Shared browser audio without a per-tab label cannot be isolated.");
+    }EndSection();
+    if(Section("Karaoke 3D"))
+    {
+        FSlider(WorldDistance);FSlider(WorldHeight);FSlider(WorldScale);FToggle(WorldWrap);
+        if(WorldWrap.Value)FSlider(WorldArc);
+        FTooltip("Letters follow a camera-centered arc and turn toward its center. Long lines fit within the placement FOV. The arc stays fixed with Stay in world.");
+        FToggle(WorldVolume);
+        if(WorldVolume.Value){FSlider(WorldDepth);FSlider(WorldMeshDetail);FSlider(WorldShade);FSlider(WorldSpecular);FColorPicker(WorldSideColor,FColorPickerEnum::Full);}
+        FSlider(WorldYaw);FSlider(WorldPitch);FSlider(WorldRoll);FSlider(WorldLightYaw);FSlider(WorldLightPitch);
+        FToggle(WorldStay);
+        FTooltip("Each appearing line slides after you for 0.75 seconds, then freezes in world space until it disappears. Overrides Follow view.");
+        if(!WorldStay.Value)FToggle(WorldFollow);
+        FToggle(WorldGround);FToggle(WorldOcclusion);
+        if(FButton("Place lyrics in front of me"))F::Karaoke.PlaceWorld();
+        FTooltip("Fixed world-space text. Place it again after changing distance/height. Follow view makes it a floating plane in front of the camera.");
+    }EndSection();
+}
+
 static void VisualsWorld()
 {
 	if (!PageTable("VisualsWorld", 2))
@@ -786,6 +901,7 @@ static void VisualsWorld()
 		FToggle(Vars::Visuals::Effects::DrawDamageNumbersThroughWalls);
 	} EndSection();
 
+    SandevistanSettings();
 	TableNextColumn();
 	if (Section("Removals"))
 	{
@@ -822,6 +938,7 @@ static void VisualsWorld()
 		fTrigger(Vars::Colors::TriggerSurfaceCenter, ShowTriggersEnum::ShowSurfaceCenters, FColorPickerEnum::Right);
 	} EndSection();
 
+    KaraokeSettings();
 	EndTable();
 }
 

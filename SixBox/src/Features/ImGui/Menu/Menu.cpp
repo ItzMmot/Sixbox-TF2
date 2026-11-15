@@ -127,6 +127,8 @@ void CMenu::DrawMenu()
 	Shell::Draw(vMenuPages, tShell);
 }
 
+static inline void ManageVars();
+
 #pragma region Tabs
 void CMenu::MenuESP()
 {
@@ -160,6 +162,7 @@ void CMenu::MenuESP()
 		PopDisabled();
 		DebugDummy({ 0, H::Draw.Scale(4) });
 
+		ManageVars(); // Rebuild owned labels after a same-frame add.
 		FDropdown(Vars::ESP::ActiveGroups, FDropdownEnum::Multi);
 
 		const int iCount = int(F::Groups.m_vGroups.size());
@@ -204,7 +207,7 @@ void CMenu::MenuESP()
 
 				const ImVec2 vPos = { flPad + (iGroup % iColumns) * (flChipWidth + flGap), flGridY + (iGroup / iColumns) * (flChipHeight + flGap) };
 				const ImVec2 vMin = GetDrawPos() + vPos, vMax = vMin + ImVec2(flChipWidth, flChipHeight);
-				const bool bSelected = iCurrentGroup == iGroup, bEnabled = Vars::ESP::ActiveGroups.Value & 1 << iGroup;
+				const bool bSelected = iCurrentGroup == iGroup, bEnabled = static_cast<unsigned int>(Vars::ESP::ActiveGroups.Value) & (1u << iGroup);
 				const bool bWithin = IsWindowHovered() && IsMouseWithin(vMin.x, vMin.y, flChipWidth, flChipHeight);
 				const float flHover = Anim(GetID(std::format("##Group{}", iGroup).c_str()), 0, bWithin ? 1.f : 0.f);
 
@@ -473,7 +476,10 @@ void CMenu::MenuESP()
         FDropdown("Quality## Aura", &effect.Quality, quality);
         FDropdown("Coverage## Aura", &effect.Coverage, {"Full", "Outline", "Fill"});
         FToggle("Additive blend## Aura", &effect.Additive);
-        FToggle("Visible sources only## Aura", &effect.VisibleOnly);
+        bool throughWalls=!effect.VisibleOnly;
+        if (FToggle("Render through walls## Aura", &throughWalls))
+            effect.VisibleOnly=!throughWalls;
+        FTooltip("Render the Aura coating through walls. Disabled: use scene depth or source visibility testing.");
         FToggle("Preset colors## Aura", &effect.PresetColors);
         FToggle("Use group color## Aura", &effect.GroupColor);
         PushTransparent(Transparent || effect.PresetColors || effect.GroupColor);
@@ -2371,6 +2377,11 @@ void CMenu::MenuSkins(int iTab)
 
 	case 1:
 	{
+        FDropdown(Vars::Visuals::SkinChanger::InventoryClasses);
+        FTooltip("Match any selected class. Shared items appear for compatible classes; All-class isolates universal items. Tools without class restrictions are under Tools / other.");
+        const auto classFilter=uint32_t(FGet(Vars::Visuals::SkinChanger::InventoryClasses));
+        static uint32_t previousClasses=InventoryClasses::All;
+        if(previousClasses!=classFilter) {uBackpackSelected=0;previousClasses=classFilter;}
 		const float flSectionHeight = std::max(H::Draw.Scale(360), GetContentRegionAvail().y - GetStyle().WindowPadding.y);
 		if (!BeginTable("SkinsBackpack", 2))
 			break;
@@ -2388,23 +2399,27 @@ void CMenu::MenuSkins(int iTab)
 			static std::vector<const ItemInfo_t*> s_vBackpackFiltered = {};
 			static std::string s_sBackpackSearch;
 			static size_t s_uBackpackSize = 0;
-			static const ItemInfo_t* const* s_pBackpackData = nullptr;
-			if (s_sBackpackSearch != sBackpackSearch || s_uBackpackSize != vBackpack.size() || s_pBackpackData != vBackpack.data())
+			static std::vector<const ItemInfo_t*> s_vBackpackSource;
+            static uint32_t s_backpackClasses=~0u;
+            static uint64_t s_backpackRevision=~0ull;
+            const auto revision=CSkinChanger::CatalogueRevision();
+			if (s_sBackpackSearch != sBackpackSearch || s_uBackpackSize != vBackpack.size() || s_vBackpackSource != vBackpack || s_backpackClasses != classFilter || s_backpackRevision != revision)
 			{
 				s_vBackpackFiltered.clear();
 				const std::string sNeedle = Lowercase(sBackpackSearch);
 				for (const auto* pItem : vBackpack)
 				{
-					if (sNeedle.empty() || Lowercase(pItem->sName).find(sNeedle) != std::string::npos)
+					if (InventoryClasses::Matches(pItem->uClassMask,classFilter) && (sNeedle.empty() || Lowercase(pItem->sName).find(sNeedle) != std::string::npos))
 						s_vBackpackFiltered.push_back(pItem);
 				}
 				s_sBackpackSearch = sBackpackSearch;
 				s_uBackpackSize = vBackpack.size();
-				s_pBackpackData = vBackpack.data();
+				s_vBackpackSource = vBackpack;
+                s_backpackClasses=classFilter;s_backpackRevision=revision;
 			}
 
 			DebugDummy({ 0, H::Draw.Scale(4) });
-			FNote(vBackpack.empty() ? "Empty, add items from the catalogue" : std::format("{} items, double click to remove", vBackpack.size()).c_str());
+			FNote(vBackpack.empty() ? "Empty, add items from the catalogue" : std::format("{} / {} items, double click to remove", s_vBackpackFiltered.size(),vBackpack.size()).c_str());
 
 			const ItemInfo_t* pSelected = uBackpackSelected ? FindItemInfo(uBackpackSelected) : nullptr;
 			const bool bSelectedOwned = pSelected && vBackpack.cend() != std::find(vBackpack.cbegin(), vBackpack.cend(), pSelected);
@@ -2459,7 +2474,10 @@ void CMenu::MenuSkins(int iTab)
 			static int s_iCatalogueFilter = -1;
 			static size_t s_uCatalogueSize = 0;
 			static const ItemInfo_t* s_pCatalogueData = nullptr;
-			if (s_sCatalogueSearch != sItemSearch || s_iCatalogueFilter != iBackpackFilter || s_uCatalogueSize != vItems.size() || s_pCatalogueData != vItems.data())
+            static uint32_t s_catalogueClasses=~0u;
+            static uint64_t s_catalogueRevision=~0ull;
+            const auto revision=CSkinChanger::CatalogueRevision();
+			if (s_sCatalogueSearch != sItemSearch || s_iCatalogueFilter != iBackpackFilter || s_uCatalogueSize != vItems.size() || s_pCatalogueData != vItems.data() || s_catalogueClasses != classFilter || s_catalogueRevision != revision)
 			{
 				s_vCatalogueFiltered.clear();
 				const std::string sNeedle = Lowercase(sItemSearch);
@@ -2468,11 +2486,12 @@ void CMenu::MenuSkins(int iTab)
 					bool bMatch = true;
 					switch (iBackpackFilter)
 					{
-					case 1: bMatch = tItem.sClass.starts_with("tf_weapon"); break;
+					case 1: bMatch = InventoryWeaponPolicy::IsWeapon(tItem.sClass); break;
 					case 2: bMatch = tItem.sClass.starts_with("tf_wearable") && tItem.bHat; break;
 					case 3: bMatch = tItem.sClass.starts_with("tf_wearable") && !tItem.bHat; break;
-					case 4: bMatch = !tItem.sClass.starts_with("tf_weapon") && !tItem.sClass.starts_with("tf_wearable"); break;
+					case 4: bMatch = !InventoryWeaponPolicy::IsWeapon(tItem.sClass) && !tItem.sClass.starts_with("tf_wearable"); break;
 					}
+                    bMatch=bMatch&&InventoryClasses::Matches(tItem.uClassMask,classFilter);
 					if (bMatch && !sNeedle.empty())
 						bMatch = Lowercase(tItem.sName).find(sNeedle) != std::string::npos;
 					if (bMatch)
@@ -2482,6 +2501,7 @@ void CMenu::MenuSkins(int iTab)
 				s_iCatalogueFilter = iBackpackFilter;
 				s_uCatalogueSize = vItems.size();
 				s_pCatalogueData = vItems.data();
+                s_catalogueClasses=classFilter;s_catalogueRevision=revision;
 			}
 
 			std::unordered_set<uint16_t> tBackpack = {};
@@ -3775,9 +3795,8 @@ void CMenu::DrawBinds()
 
 static inline void ManageVars()
 {
-	Vars::ESP::ActiveGroups.m_vValues = {};
-	for (auto& tGroup : F::Groups.m_vGroups)
-		Vars::ESP::ActiveGroups.m_vValues.push_back(tGroup.m_sName.c_str());
+    static CGroupLabels<MAX_GROUPS> labels;
+    labels.Refresh(F::Groups.m_vGroups,Vars::ESP::ActiveGroups.m_vValues);
 }
 
 static inline std::string GetNoticePath()
@@ -3870,6 +3889,10 @@ void CMenu::DrawNotice()
 
 void CMenu::Render()
 {
+    // Match config load/save locking. Publication runs before this lock leaves,
+    // including early exits and edits made through material management.
+    std::scoped_lock settings(F::Binds.m_mMutex);
+    struct PublishGroups {~PublishGroups(){F::Groups.Publish();}} publish;
 	using namespace ImGui;
 
 	if (!(GetIO().DisplaySize.x > 160.f && GetIO().DisplaySize.y > 28.f))

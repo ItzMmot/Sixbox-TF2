@@ -1,5 +1,8 @@
 #include "../SDK/SDK.h"
 #include "../Features/Visuals/Aura/Aura.h"
+#ifndef TEXTMODE
+#include "../Features/Visuals/Sandevistan/Sandevistan.h"
+#endif
 #include "../Features/Visuals/Groups/Groups.h"
 
 #include "../Features/Visuals/Chams/Chams.h"
@@ -22,7 +25,14 @@ MAKE_HOOK(IVModelRender_DrawModelExecute, U::Memory.GetVirtual(I::ModelRender, 1
 		|| F::CameraWindow.m_bDrawing || !F::Materials.m_bLoaded || G::Unload)
 		return CALL_ORIGINAL(rcx, pState, pInfo, pBoneToWorld);
 
+    if (CSandevistan::Rendering())
+    {
+        if(F::Sandevistan.RenderBody(rcx,pState,pInfo,pBoneToWorld,CALL_ORIGINAL))return;
+        return CALL_ORIGINAL(rcx,pState,pInfo,pBoneToWorld);
+    }
     if (CAura::Capturing()) return CALL_ORIGINAL(rcx,pState,pInfo,pBoneToWorld);
+    if (s_bDrawingViewmodel && !F::Chams.m_bRendering && !F::Glow.m_bRendering)
+        F::Sandevistan.RenderViewmodel(rcx,pState,pInfo,pBoneToWorld,CALL_ORIGINAL);
     if (!F::CameraWindow.m_bDrawing && (!F::Chams.m_bRendering || s_bDrawingViewmodel) && !F::Glow.m_bRendering)
         F::Aura.Capture(rcx,pState,pInfo,pBoneToWorld,CALL_ORIGINAL);
 

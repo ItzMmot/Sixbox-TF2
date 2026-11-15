@@ -83,13 +83,13 @@ void CAura::BeginFrame()
     m_source={};m_source.frame=frame;m_source.epoch=m_epoch.load(std::memory_order_acquire);
     m_groups.fill(-1);m_seenCount=0;
     if(!F::Groups.GroupsActive()) return;
-    const int count=int((std::min)(F::Groups.m_vGroups.size(),size_t(MAX_GROUPS)));
+    const int count=int((std::min)(F::Groups.RuntimeGroups().size(),size_t(MAX_GROUPS)));
     int used=0;
     for(int pass=0;pass<2;++pass)
         for(int group=count-1;group>=0 && used<Aura::Layers;--group)
         {
-            const auto& data=F::Groups.m_vGroups[group];
-            if(!(static_cast<uint32_t>(Vars::ESP::ActiveGroups.Value)&(1u<<group)) || !data.m_tAura.Enabled) continue;
+            const auto& data=F::Groups.RuntimeGroups()[group];
+            if(!(F::Groups.ActiveMask()&(1u<<group)) || !data.m_tAura.Enabled) continue;
             const bool firstperson=data.m_iTargets&(TargetsEnum::ViewmodelHands|TargetsEnum::ViewmodelWeapon);
             if(firstperson!=(pass==0)) continue;
             m_groups[used++]=group;
@@ -145,7 +145,7 @@ void CAura::Capture(IVModelRender* render,const DrawModelState_t& state,const Mo
     Aura_t style=group->m_tAura;style.Sanitize();
     if(!kind && (local->m_vecOrigin()-info.origin).LengthSqr()>style.Distance*style.Distance) return;
     BeginFrame();
-    const int groupIndex=int(group-F::Groups.m_vGroups.data());
+    const int groupIndex=int(group-F::Groups.RuntimeGroups().data());
     int slot=-1;
     for(int i=0;i<Aura::Layers;++i) if(m_groups[i]==groupIndex) {slot=i;break;}
     if(slot<0 || !m_targets[slot] || m_targets[slot]->IsError()) return;

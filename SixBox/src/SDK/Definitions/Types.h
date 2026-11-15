@@ -1178,6 +1178,7 @@ struct ESP_t
 
 struct Aura_t : Aura::Settings
 {
+    bool operator==(const Aura_t&) const = default;
     Color_t Core = { 255, 162, 72, 255 };
     Color_t Edge = { 191, 65, 29, 255 };
 };

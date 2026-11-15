@@ -14,7 +14,9 @@
 #ifndef TEXTMODE
 #include "../Features/Visuals/Aura/Aura.h"
 #include "../Features/Visuals/JumpCoach/JumpCoach.h"
+#include "../Features/Visuals/Sandevistan/Sandevistan.h"
 #include "../Features/Visuals/SkinChanger/SkinChanger.h"
+#include "../Features/Visuals/Karaoke/Karaoke.h"
 #endif
 
 MAKE_HOOK(CHLClient_LevelShutdown, U::Memory.GetVirtual(I::Client, 7), void,
@@ -27,6 +29,9 @@ MAKE_HOOK(CHLClient_LevelShutdown, U::Memory.GetVirtual(I::Client, 7), void,
 	F::AutoTrolldier.Reset();
 	F::Backtrack.Reset();
 	F::Chams.Reset();
+#ifndef TEXTMODE
+    F::Sandevistan.Reset();
+#endif
 	H::Entities.Clear(true);
 	F::EnginePrediction.Unload();
 	F::Spectate.Reset();
@@ -42,6 +47,7 @@ MAKE_HOOK(CHLClient_LevelShutdown, U::Memory.GetVirtual(I::Client, 7), void,
 	F::AutoVote.Reset();
 #ifndef TEXTMODE
 	F::SkinChanger.OnLevelShutdown();
+    F::Karaoke.ResetWorld();
 #endif
 
 	CALL_ORIGINAL(rcx);

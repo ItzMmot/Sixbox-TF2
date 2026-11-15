@@ -4,6 +4,10 @@
 #include "../Aimbot/SpyKnife/SpyKnife.h"
 #include "../Visuals/Aura/Aura.h"
 #include "../Visuals/JumpCoach/JumpCoach.h"
+#ifndef TEXTMODE
+#include "../Visuals/Sandevistan/Sandevistan.h"
+#endif
+#include "../Visuals/Karaoke/Karaoke.h"
 
 #include "../../Hooks/Direct3DDevice9.h"
 #include <ImGui/imgui_impl_win32.h>
@@ -27,9 +31,11 @@
 void CRender::Render(IDirect3DDevice9* pDevice)
 {
     auto backgroundFrame=F::MenuBackground.LockFrame();
+    auto karaokeFrame=F::Karaoke.LockFrame();
 	if (m_pDevice && pDevice != m_pDevice && m_bLoaded)
 	{
 		F::CaptureOverlay.ReleaseDeviceObjects();
+        F::Karaoke.ReleaseDevice();
 		ImGui_ImplDX9_Shutdown();
 		ImGui_ImplDX9_Init(pDevice);
 	}
@@ -97,7 +103,7 @@ void CRender::Render(IDirect3DDevice9* pDevice)
 		F::PlayerConditions.Draw();
 		F::Backtrack.Draw();
 		F::NavRender.DrawIndicators();
-        if(!I::EngineVGui->IsGameUIVisible()) F::JumpCoach.DrawHUD();
+        if(!I::EngineVGui->IsGameUIVisible()) {F::JumpCoach.DrawHUD();F::Sandevistan.DrawHUD();}
         F::SpyKnife.DrawHUD();
 
 		F::ESP.Draw(pBackground);
@@ -106,6 +112,7 @@ void CRender::Render(IDirect3DDevice9* pDevice)
 
 		ImGui::PopFont();
 	}
+    F::Karaoke.Draw(pDevice,!bTransient&&(bPrivate||bDrawGame)&&!SDK::CleanScreenshot());
 	if (!bPrivate)
 		F::CaptureOverlay.Hide();
 
@@ -136,6 +143,7 @@ void CRender::LoadColors()
 void CRender::LoadFonts()
 {
 	SDK::CInitTimingScope tFonts("ImGui.LoadFonts");
+    F::Karaoke.ResetText();
 
 	auto& io = ImGui::GetIO();
 	if (static bool bLoaded = false; !bLoaded)

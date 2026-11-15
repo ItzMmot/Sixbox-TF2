@@ -674,6 +674,35 @@ NAMESPACE_BEGIN(Vars)
 	NAMESPACE_END(ESP)
 
 	NAMESPACE_BEGIN(Visuals)
+        NAMESPACE_BEGIN(Sandevistan)
+            CVar(Enabled, "Sandevistan", false, VISUAL);
+            CVarEnum(Triggers, "Triggers", 3, VISUAL | NOBIND | DROPDOWN_MULTI, "Off", VA_LIST("Warp", "Doubletap"), Warp = 1, Doubletap = 2);
+            CVar(StartColor, "Start color", Color_t(40,255,185,210), VISUAL | NOBIND);
+            CVar(EndColor, "End color", Color_t(160,75,255,200), VISUAL | NOBIND);
+            CVar(Reverse, "Reverse gradient", false, VISUAL | NOBIND);
+            CVar(GradientBias, "Gradient bias", 1.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .25f, 4.f, .05f);
+            CVar(Copies, "World copies", 8, VISUAL | NOBIND | SLIDER_CLAMP, 1, 24, 1);
+            CVar(Duration, "Trail lifetime", .85f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .15f, 3.f, .05f, "%gs");
+            CVar(Opacity, "Trail opacity", .6f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+            CVar(FadePower, "Fade curve", 1.5f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .25f, 5.f, .05f);
+            CVar(FadeIn, "Trail fade in", .025f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, .25f, .005f, "%gs");
+            CVar(Stagger, "Lifetime stagger", .3f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, .8f, .05f);
+            CVar(MinSpacing, "Warp copy spacing", 4.f, VISUAL | NOBIND | SLIDER_CLAMP, 0.f, 64.f, 1.f, "%g HU");
+            CVar(StationarySpread, "Stationary copy spread", 4.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 32.f, .5f, "%g HU");
+            CVar(Drift, "Upward drift", 4.f, VISUAL | NOBIND | SLIDER_CLAMP, -40.f, 60.f, 1.f, "%g HU/s");
+            CVar(Scale, "Copy scale", 1.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .75f, 1.3f, .01f);
+            CVarEnum(Material, "Copy material", 0, VISUAL | NOBIND, nullptr, VA_LIST("Flat", "Additive", "Wireframe"), Flat, Additive, Wireframe);
+            CVar(ThroughWalls, "Copies through walls", false, VISUAL | NOBIND);
+            CVar(MinCameraDistance, "Hide near camera", 20.f, VISUAL | NOBIND | SLIDER_CLAMP, 0.f, 80.f, 2.f, "%g HU");
+            CVar(DrawBudget, "Copy draw budget", 24, VISUAL | NOBIND | SLIDER_CLAMP, 1, 64, 1);
+            CVar(Viewmodel, "First person echo", true, VISUAL | NOBIND);
+            CVar(ViewCopies, "First person copies", 3, VISUAL | NOBIND | SLIDER_CLAMP, 1, 8, 1);
+            CVar(ViewSpread, "First person spread", .8f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 4.f, .1f, "%g HU");
+            CVar(ViewOpacity, "First person opacity", .35f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+            CVar(SpeedLines, "Speed lines", true, VISUAL | NOBIND);
+            CVar(LineCount, "Speed line count", 12, VISUAL | NOBIND | SLIDER_CLAMP, 4, 40, 1);
+            CVar(ScreenStrength, "Screen accent strength", .3f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+        NAMESPACE_END(Sandevistan)
 		NAMESPACE_BEGIN(UI)
 			CVarEnum(StreamerMode, "Streamer mode", 0, VISUAL, nullptr,
 				VA_LIST("Off", "Local", "Friends", "Party", "All"),
@@ -697,6 +726,10 @@ NAMESPACE_BEGIN(Vars)
 		NAMESPACE_BEGIN(SkinChanger)
 			CVar(Enabled, "Skin changer", false, VISUAL);
 			CVar(AllowUnsupported, "Enable applying not supported warpaints", false, VISUAL);
+            CVarEnum(InventoryClasses, "Classes", 0b11111111111, VISUAL | NOBIND | DROPDOWN_MULTI, nullptr,
+                VA_LIST("Scout", "Soldier", "Pyro", "Demoman", "Heavy", "Engineer", "Medic", "Sniper", "Spy", "All-class", "Tools / other"),
+                Scout=1<<0, Soldier=1<<1, Pyro=1<<2, Demoman=1<<3, Heavy=1<<4, Engineer=1<<5, Medic=1<<6, Sniper=1<<7, Spy=1<<8, AllClass=1<<9, Other=1<<10);
+
 		NAMESPACE_END(SkinChanger)
 
 		NAMESPACE_BEGIN(Thirdperson)
@@ -762,6 +795,93 @@ NAMESPACE_BEGIN(Vars)
 		NAMESPACE_END(Viewmodel)
 
 		NAMESPACE_BEGIN(World)
+            NAMESPACE_BEGIN(Karaoke)
+                CVar(Enabled, "Karaoke enabled", false, VISUAL | NOBIND);
+                CVarEnum(Provider, "Lyrics provider", 0, VISUAL | NOBIND, nullptr, VA_LIST("LRCLIB", "Spicy Lyrics"), LRCLIB, Spicy);
+                CVar(SpicyKey, "Spicy Lyrics API key", std::string(), VISUAL | NOBIND);
+                CVar(MusixmatchKey, "Musixmatch fallback key", std::string(), VISUAL | NOBIND);
+                CVarEnum(Source, "Music source", 0, VISUAL | NOBIND, nullptr, VA_LIST("Auto", "Spotify", "YouTube Music / browser", "Any MPRIS player"), Auto, Spotify, YouTubeMusic, Any);
+                CVarEnum(Outputs, "Karaoke outputs", 0b101, VISUAL | NOBIND | DROPDOWN_MULTI, nullptr, VA_LIST("2D text", "3D text", "HUD"), Text2D=1, Text3D=2, HUD=4);
+                CVarEnum(OldText, "Old lyric effect", 0, VISUAL | NOBIND, nullptr, VA_LIST("Darkening", "Transparency", "Fall down", "Letter crumble"), Darkening, Transparency, FallDown, Crumble);
+                CVarValues(Font, "Lyrics font", 1, VISUAL | NOBIND, nullptr, "Regular", "Bold", "Monospace");
+                CVar(CrumbleStagger, "Letter crumble stagger", .025f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, .15f, .005f, "%gs");
+                CVar(CrumbleDuration, "Letter crumble duration", 1.6f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .2f, 6.f, .1f, "%gs");
+                CVar(CrumbleDistance, "Letter crumble fall distance", 120.f, VISUAL | NOBIND | SLIDER_CLAMP, 10.f, 500.f, 5.f);
+                CVar(CrumbleSpread, "Letter crumble spread", 70.f, VISUAL | NOBIND | SLIDER_CLAMP, 0.f, 300.f, 5.f);
+                CVar(CrumbleSpin, "Letter crumble rotation", 300.f, VISUAL | NOBIND | SLIDER_CLAMP, 0.f, 1080.f, 15.f);
+                CVar(CrumbleDepth, "Letter crumble depth drift", 8.f, VISUAL | NOBIND | SLIDER_CLAMP, 0.f, 60.f, 1.f);
+                CVar(CrumbleGravity, "Letter crumble gravity", 1.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .2f, 3.f, .1f);
+                CVarValues(CrumbleOrder, "Letter crumble order", 0, VISUAL | NOBIND, nullptr, "Left to right", "Right to left", "Random");
+                CVarEnum(TextGlass, "Lyric text material", 0, VISUAL | NOBIND, nullptr, VA_LIST("Solid", "Frosted glass", "Liquid glass"), Solid, Frosted, Liquid);
+                CVar(TextBlur, "Text glass blur", 7.f, VISUAL | NOBIND | SLIDER_CLAMP, 0.f, 32.f, 1.f);
+                CVar(TextRefraction, "Text glass refraction", 4.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 20.f, .5f);
+                CVar(TextChromatic, "Text glass chromatic separation", 1.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 8.f, .1f);
+                CVar(TextFrost, "Text glass frost", .025f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, .2f, .005f);
+                CVar(TextEdge, "Text glass edge light", .4f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(TextTint, "Text glass tint strength", .5f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(TextGlassOpacity, "Text glass opacity", 1.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .1f, 1.f, .05f);
+                CVar(FontSize, "Lyrics size", 29.f, VISUAL | NOBIND | SLIDER_CLAMP, 12.f, 72.f, 1.f);
+                CVar(LineSpacing, "Lyrics line spacing", 1.45f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 1.f, 2.5f, .05f);
+                CVar(Context, "Visible surrounding lines", 2, VISUAL | NOBIND | SLIDER_CLAMP, 0, 5, 1);
+                CVar(Offset, "Lyrics sync offset", 0.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, -10.f, 10.f, .05f, "%gs");
+                CVar(Smoothing, "Lyrics scroll smoothing", .75f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(ActiveScale, "Active line emphasis", 1.08f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 1.f, 1.3f, .01f);
+                CVar(OldStrength, "Old lyric effect strength", .72f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(FallDistance, "Lyric fall distance", 120.f, VISUAL | NOBIND | SLIDER_CLAMP, 20.f, 500.f, 5.f);
+                CVar(FallTime, "Lyric fall duration", 1.5f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .2f, 5.f, .1f);
+                CVar(Opacity, "Lyrics opacity", 1.f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(Glow, "Lyrics glow", .3f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(Shadow, "Lyrics shadow", 2.f, VISUAL | NOBIND | SLIDER_CLAMP, 0.f, 6.f, 1.f);
+                CVar(TextColor, "Lyrics base color", Color_t(180,184,196,255), VISUAL | NOBIND);
+                CVar(Highlight, "Lyrics highlight", Color_t(160,174,245,255), VISUAL | NOBIND);
+                CVar(TextX, "2D lyrics X", .5f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .01f);
+                CVar(TextY, "2D lyrics Y", .76f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .01f);
+                CVar(WorldDistance, "3D text distance", 160.f, VISUAL | NOBIND | SLIDER_CLAMP, 40.f, 1000.f, 10.f);
+                CVar(WorldHeight, "3D text height", 12.f, VISUAL | NOBIND | SLIDER_CLAMP, -100.f, 160.f, 2.f);
+                CVar(WorldScale, "3D text scale", .16f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .03f, .8f, .01f);
+                CVar(WorldWrap, "3D text wraps camera", true, VISUAL | NOBIND);
+                CVar(WorldArc, "3D text wrap angle", 85.f, VISUAL | NOBIND | SLIDER_CLAMP, 30.f, 160.f, 5.f);
+                CVar(WorldVolume, "Volumetric 3D letters", true, VISUAL | NOBIND);
+                CVar(WorldDepth, "3D letter extrusion", 2.5f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .1f, 20.f, .1f);
+                CVar(WorldMeshDetail, "3D outline detail", 6, VISUAL | NOBIND | SLIDER_CLAMP, 3, 16, 1);
+                CVar(WorldYaw, "3D text yaw", 12.f, VISUAL | NOBIND | SLIDER_CLAMP, -180.f, 180.f, 1.f);
+                CVar(WorldPitch, "3D text pitch", 0.f, VISUAL | NOBIND | SLIDER_CLAMP, -180.f, 180.f, 1.f);
+                CVar(WorldRoll, "3D text roll", 0.f, VISUAL | NOBIND | SLIDER_CLAMP, -180.f, 180.f, 1.f);
+                CVar(WorldShade, "3D letter shading", .65f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(WorldSpecular, "3D letter specular", .3f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(WorldLightYaw, "3D light yaw", -135.f, VISUAL | NOBIND | SLIDER_CLAMP, -180.f, 180.f, 1.f);
+                CVar(WorldLightPitch, "3D light elevation", 45.f, VISUAL | NOBIND | SLIDER_CLAMP, -89.f, 89.f, 1.f);
+                CVar(WorldSideColor, "3D letter side color", Color_t(98,110,160,255), VISUAL | NOBIND);
+                CVar(WorldStay, "Stay in world", false, VISUAL | NOBIND);
+                CVar(WorldFollow, "3D text follows view", false, VISUAL | NOBIND);
+                CVar(WorldGround, "3D falling lyrics stop below ground", true, VISUAL | NOBIND);
+                CVar(WorldOcclusion, "3D text wall occlusion", true, VISUAL | NOBIND);
+                CVar(HudX, "Karaoke HUD X", .76f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .01f);
+                CVar(HudY, "Karaoke HUD Y", .08f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .01f);
+                CVar(HudWidth, "Karaoke HUD width", 380.f, VISUAL | NOBIND | SLIDER_CLAMP, 260.f, 720.f, 10.f);
+                CVar(HudLyrics, "Lyrics inside HUD", true, VISUAL | NOBIND);
+                CVar(Controls, "HUD playback controls", true, VISUAL | NOBIND);
+                CVar(Credits, "Lyric credits", true, VISUAL | NOBIND);
+                CVar(Visualizer, "Music visualizer", true, VISUAL | NOBIND);
+                CVarValues(VisualizerMode, "Visualizer visibility", 1, VISUAL | NOBIND, nullptr, "Always", "No text");
+                CVar(VisualizerHeight, "Visualizer height", 116.f, VISUAL | NOBIND | SLIDER_CLAMP, 60.f, 240.f, 4.f);
+                CVar(VisualizerGain, "Visualizer sensitivity", 1.15f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .2f, 3.f, .05f);
+                CVar(VisualizerReaction, "Visualizer drum response", .85f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(VisualizerGlow, "Visualizer glow", .7f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(VisualizerParticles, "Visualizer particles", .65f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(VisualizerPulse, "Visualizer bass pulse", .65f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .05f);
+                CVar(VisualizerColor, "Visualizer secondary color", Color_t(207,137,226,255), VISUAL | NOBIND);
+                CVarEnum(Glass, "Karaoke HUD material", 2, VISUAL | NOBIND, nullptr, VA_LIST("Solid", "Frosted glass", "Liquid glass"), Solid, Frosted, Liquid);
+                CVar(PanelColor, "Karaoke panel tint", Color_t(20,23,32,110), VISUAL | NOBIND);
+                CVar(PanelOpacity, "Karaoke panel opacity", .92f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, .1f, 1.f, .02f);
+                CVar(Blur, "Glass blur radius", 12.f, VISUAL | NOBIND | SLIDER_CLAMP, 0.f, 32.f, 1.f);
+                CVar(Refraction, "Glass refraction", .12f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, .5f, .01f);
+                CVar(Zoom, "Glass magnification", 1.02f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 1.f, 1.25f, .01f);
+                CVar(Chromatic, "Glass chromatic separation", 1.3f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 8.f, .1f);
+                CVar(Frost, "Glass frost grain", .035f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, .2f, .005f);
+                CVar(EdgeGlow, "Glass edge light", .16f, VISUAL | NOBIND | SLIDER_CLAMP | SLIDER_PRECISION, 0.f, 1.f, .02f);
+                CVar(Rounding, "Karaoke panel radius", 14.f, VISUAL | NOBIND | SLIDER_CLAMP, 0.f, 40.f, 1.f);
+            NAMESPACE_END(Karaoke)
 			CVarEnum(Modulations, "Modulations", 0b00000, VISUAL | DROPDOWN_MULTI, nullptr,
 				VA_LIST("World", "Sky", "Prop", "Particle", "Fog"),
 				World = 1 << 0, Sky = 1 << 1, Prop = 1 << 2, Particle = 1 << 3, Fog = 1 << 4);

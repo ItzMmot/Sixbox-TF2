@@ -56,23 +56,37 @@ static void WriteJson(const std::filesystem::path& tPath, const boost::property_
 	std::filesystem::path tTemp = tPath;
 	tTemp += ".tmp";
 
-	boost::property_tree::write_json(tTemp.string(), tTree);
-	if (!std::filesystem::exists(tTemp))
-		throw std::runtime_error("Config was not written");
+    {
+        std::ofstream file(tTemp,std::ios::binary|std::ios::trunc);
+        if(!file) throw std::runtime_error("Could not open temporary config");
+        boost::property_tree::write_json(file,tTree);
+        file.flush();file.close();
+        if(!file) throw std::runtime_error("Config write failed");
+    }
 
 	std::error_code tError;
 	std::filesystem::rename(tTemp, tPath, tError);
 	if (tError)
 	{
-		std::filesystem::remove(tPath, tError);
-		tError.clear();
-		std::filesystem::rename(tTemp, tPath, tError);
+        // Windows rename does not replace an existing destination. Preserve the
+        // old file if replacement fails instead of deleting it first.
+        if (MoveFileExW(tTemp.c_str(),tPath.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
+            tError.clear();
+        else
+            tError=std::error_code(GetLastError(),std::system_category());
 		if (tError)
 		{
 			std::filesystem::remove(tTemp);
 			throw std::filesystem::filesystem_error("Config replace failed", tTemp, tPath, tError);
 		}
 	}
+}
+
+static void ReadJson(const std::filesystem::path& path,boost::property_tree::ptree& tree)
+{
+    std::ifstream file(path,std::ios::binary);
+    if(!file) throw std::runtime_error("Could not open config");
+    boost::property_tree::read_json(file,tree);
 }
 
 struct LoadingScope_t
@@ -104,10 +118,16 @@ static ConfigMapRestore CaptureConfigMaps()
 	return vRestore;
 }
 
-static void SaveSkinChanger(boost::property_tree::ptree& tWrite)
+static void SaveSkinChanger(boost::property_tree::ptree& tWrite,bool includeOptions=true)
 {
+    const auto profile=F::SkinChanger.GetProfile();
 	boost::property_tree::ptree tSub;
-	for (const auto& [iDef, tSkin] : F::SkinChanger.GetSkins())
+    if(includeOptions)
+    {
+        tSub.put("Enabled",Vars::Visuals::SkinChanger::Enabled.Value);
+        tSub.put("AllowUnsupported",Vars::Visuals::SkinChanger::AllowUnsupported.Value);
+    }
+	for (const auto& [iDef, tSkin] : profile.skins)
 	{
 		if (tSkin.Empty())
 			continue;
@@ -130,7 +150,7 @@ static void SaveSkinChanger(boost::property_tree::ptree& tWrite)
 	}
 	{
 		boost::property_tree::ptree tBackpack;
-		for (const auto& tItem : F::SkinChanger.GetBackpack())
+		for (const auto& tItem : profile.backpack)
 		{
 			boost::property_tree::ptree tChild;
 			tChild.put("Def", tItem.iDef);
@@ -146,18 +166,20 @@ static void SaveSkinChanger(boost::property_tree::ptree& tWrite)
 		tSub.put_child("Backpack", tBackpack);
 
 		boost::property_tree::ptree tLoadout;
-		for (const auto& [iIndex, uItemID] : F::SkinChanger.GetLoadout())
+		for (const auto& [iIndex, uItemID] : profile.loadout)
 			tLoadout.put(std::to_string(iIndex), std::to_string(uItemID));
 		tSub.put_child("Loadout", tLoadout);
 	}
 	tWrite.put_child("SkinChanger", tSub);
 }
 
-static void LoadSkinChanger(const boost::property_tree::ptree& tRead)
+static bool LoadSkinChanger(const boost::property_tree::ptree& tRead,bool includeOptions=true)
 {
-	std::unordered_map<int, Skin_t> mSkins;
-	std::vector<BackpackItem_t> vBackpack;
-	std::map<int, uint64_t> mLoadout;
+    const auto section=tRead.get_child_optional("SkinChanger");
+    if(!section) return false;
+    if(!section->data().empty()) throw std::runtime_error("Invalid SkinChanger section");
+    SkinProfile_t profile;
+    auto& mSkins=profile.skins;auto& vBackpack=profile.backpack;auto& mLoadout=profile.loadout;
 	if (auto tSub = tRead.get_child_optional("SkinChanger"))
 	{
 		for (const auto& tPair : *tSub)
@@ -223,9 +245,17 @@ static void LoadSkinChanger(const boost::property_tree::ptree& tRead)
 			}
 		}
 	}
-	F::SkinChanger.SetBackpack(std::move(vBackpack));
-	F::SkinChanger.SetLoadout(std::move(mLoadout));
-	F::SkinChanger.SetSkins(std::move(mSkins));
+    // Parse completely before atomically replacing all three collections.
+    F::SkinChanger.SetProfile(std::move(profile));
+    auto option=[&](const char* key,ConfigVar<bool>& variable) {
+        if(auto value=section->get_optional<bool>(key)) variable.Value=variable[DEFAULT_BIND]=*value;
+    };
+    if(includeOptions)
+    {
+        option("Enabled",Vars::Visuals::SkinChanger::Enabled);
+        option("AllowUnsupported",Vars::Visuals::SkinChanger::AllowUnsupported);
+    }
+    return true;
 }
 
 template <class T> void CConfigs::SaveJson(boost::property_tree::ptree& t, const std::string& s, const T& v)
@@ -712,6 +742,16 @@ CConfigs::CConfigs()
 	LoadState();
 }
 
+void CConfigs::LoadStartup()
+{
+    std::scoped_lock lock(F::Binds.m_mMutex);
+    const auto visual=m_sCurrentVisuals,skins=m_sCurrentSkins;
+    const bool preferProfile=m_bUseSkinProfile;
+    LoadConfig(m_sCurrentConfig,false);
+    if(!visual.empty()) LoadVisual(visual,false);
+    if(preferProfile||!m_bConfigHasSkins) LoadSkins(skins,false);
+}
+
 void CConfigs::LoadState()
 {
 	try
@@ -720,16 +760,17 @@ void CConfigs::LoadState()
 			return;
 
 		boost::property_tree::ptree tRead;
-		read_json(m_sStatePath, tRead);
+		ReadJson(m_sStatePath, tRead);
 		const std::string sConfig = tRead.get("Config", m_sCurrentConfig);
 		const std::string sVisuals = tRead.get("Visuals", m_sCurrentVisuals);
 		const std::string sSkins = tRead.get("Skins", m_sCurrentSkins);
+        m_bUseSkinProfile=tRead.get("UseSkinProfile",true);
 		if (IsSafeConfigName(sConfig))
 			m_sCurrentConfig = sConfig;
 		if (IsSafeConfigName(sVisuals))
 			m_sCurrentVisuals = sVisuals;
-			if (IsSafeConfigName(sSkins))
-				m_sCurrentSkins = sSkins;
+		if (IsSafeConfigName(sSkins))
+			m_sCurrentSkins = sSkins;
 	}
 	catch (...) {}
 }
@@ -741,6 +782,7 @@ void CConfigs::SaveState() const
 		boost::property_tree::ptree tWrite;
 		tWrite.put("Config", m_sCurrentConfig);
 		tWrite.put("Skins", m_sCurrentSkins);
+        tWrite.put("UseSkinProfile",m_bUseSkinProfile);
 		tWrite.put("Visuals", m_sCurrentVisuals);
 		WriteJson(m_sStatePath, tWrite);
 	}
@@ -881,9 +923,12 @@ bool CConfigs::SaveConfig(const std::string& sConfigName, bool bNotify)
 		}
 
 
+		SaveSkinChanger(tWrite,false);
 		WriteJson(tPath, tWrite);
 
 		m_sCurrentConfig = sConfigName; m_sCurrentVisuals = "";
+        m_bUseSkinProfile=false;
+        m_bConfigHasSkins=true;
 		SaveState();
 		if (bNotify)
 			SDK::Output("SixBox", std::format("Config {} saved", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
@@ -910,6 +955,8 @@ bool CConfigs::LoadConfig(const std::string& sConfigName, bool bNotify)
 	ConfigMapRestore vRestore;
 	const std::string sOldCurrentConfig = m_sCurrentConfig;
 	const std::string sOldCurrentVisuals = m_sCurrentVisuals;
+    const bool oldUseSkinProfile=m_bUseSkinProfile,oldHasSkins=m_bConfigHasSkins;
+    SkinProfile_t oldSkinProfile;
 	bool bTransaction = false;
 	try
 	{
@@ -925,10 +972,11 @@ bool CConfigs::LoadConfig(const std::string& sConfigName, bool bNotify)
 		std::scoped_lock lock(F::Binds.m_mMutex);
 
 		boost::property_tree::ptree tRead;
-		read_json(tPath.string(), tRead);
+		ReadJson(tPath, tRead);
 		vOldBinds = F::Binds.m_vBinds;
 		vOldGroups = F::Groups.m_vGroups;
 		vRestore = CaptureConfigMaps();
+        oldSkinProfile=F::SkinChanger.GetProfile();
 		bTransaction = true;
 
 		F::Binds.m_vBinds.clear();
@@ -1049,8 +1097,11 @@ bool CConfigs::LoadConfig(const std::string& sConfigName, bool bNotify)
 			SDK::Output("SixBox", "Config groups not found", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
 
 
+        m_bConfigHasSkins=LoadSkinChanger(tRead,false);
+        if(m_bConfigHasSkins) m_bUseSkinProfile=false;
 		MigrateBrandLabels();
 		F::Binds.SetVars(nullptr, nullptr, false);
+		F::Groups.Publish();
 		H::Fonts.Reload();
 
 		m_sCurrentConfig = sConfigName; m_sCurrentVisuals = "";
@@ -1068,9 +1119,12 @@ bool CConfigs::LoadConfig(const std::string& sConfigName, bool bNotify)
 			F::Groups.m_vGroups = std::move(vOldGroups);
 			for (auto& fRestore : vRestore)
 				fRestore();
+            F::SkinChanger.SetProfile(std::move(oldSkinProfile));
+            m_bUseSkinProfile=oldUseSkinProfile;m_bConfigHasSkins=oldHasSkins;
 			m_sCurrentConfig = sOldCurrentConfig;
 			m_sCurrentVisuals = sOldCurrentVisuals;
 			F::Binds.SetVars(nullptr, nullptr, false);
+			F::Groups.Publish();
 		}
 		SDK::Output("SixBox", "Load config failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
 		return false;
@@ -1196,7 +1250,7 @@ bool CConfigs::LoadVisual(const std::string& sConfigName, bool bNotify)
 			return false;
 
 		boost::property_tree::ptree tRead;
-		read_json(tPath.string(), tRead);
+		ReadJson(tPath, tRead);
 		vOldGroups = F::Groups.m_vGroups;
 		vRestore = CaptureConfigMaps();
 		bTransaction = true;
@@ -1268,6 +1322,7 @@ bool CConfigs::LoadVisual(const std::string& sConfigName, bool bNotify)
 
 		MigrateBrandLabels();
 		F::Binds.SetVars(nullptr, nullptr, false);
+		F::Groups.Publish();
 
 		m_sCurrentVisuals = sConfigName;
 		SaveState();
@@ -1285,6 +1340,7 @@ bool CConfigs::LoadVisual(const std::string& sConfigName, bool bNotify)
 				fRestore();
 			m_sCurrentVisuals = sOldCurrentVisuals;
 			F::Binds.SetVars(nullptr, nullptr, false);
+			F::Groups.Publish();
 		}
 		SDK::Output("SixBox", "Load visuals failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
 		return false;
@@ -1359,6 +1415,7 @@ void CConfigs::ResetConfig(const std::string& sConfigName, bool bNotify)
 
 		SaveConfig(sConfigName, false);
 		F::Binds.SetVars(nullptr, nullptr, false);
+		F::Groups.Publish();
 		H::Fonts.Reload();
 
 		if (bNotify)
@@ -1420,6 +1477,7 @@ void CConfigs::ResetVisual(const std::string& sConfigName, bool bNotify)
 		SaveVisual(sConfigName, false);
 		MigrateBrandLabels();
 		F::Binds.SetVars(nullptr, nullptr, false);
+		F::Groups.Publish();
 
 		if (bNotify)
 			SDK::Output("SixBox", std::format("Visual config {} reset", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
@@ -1438,13 +1496,15 @@ bool CConfigs::SaveSkins(const std::string& sConfigName, bool bNotify)
 
 	try
 	{
+        std::scoped_lock settings(F::Binds.m_mMutex);
 		boost::property_tree::ptree tWrite;
 		SaveSkinChanger(tWrite);
 		WriteJson(tPath, tWrite);
 		m_sCurrentSkins = sConfigName;
+        m_bUseSkinProfile=true;
 		SaveState();
-	if (bNotify)
-		SDK::Output("SixBox", std::format("Skin config {} saved", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
+		if (bNotify)
+			SDK::Output("SixBox", std::format("Skin config {} saved", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
 	}
 	catch (...)
 	{
@@ -1461,9 +1521,11 @@ bool CConfigs::LoadSkins(const std::string& sConfigName, bool bNotify)
 	if (tPath.empty())
 		return false;
 
-	auto mOldSkins = F::SkinChanger.GetSkins();
-	auto tOldBackpack = F::SkinChanger.GetBackpack();
-	auto mOldLoadout = F::SkinChanger.GetLoadout();
+    std::scoped_lock settings(F::Binds.m_mMutex);
+    auto oldProfile=F::SkinChanger.GetProfile();
+    const auto oldEnabled=Vars::Visuals::SkinChanger::Enabled.Map;
+    const auto oldUnsupported=Vars::Visuals::SkinChanger::AllowUnsupported.Map;
+    const bool oldUseSkinProfile=m_bUseSkinProfile;
 	const std::string sOldCurrentSkins = m_sCurrentSkins;
 	bool bTransaction = false;
 	try
@@ -1472,12 +1534,13 @@ bool CConfigs::LoadSkins(const std::string& sConfigName, bool bNotify)
 			return false;
 
 		boost::property_tree::ptree tRead;
-		read_json(tPath.string(), tRead);
+		ReadJson(tPath, tRead);
 		bTransaction = true;
 
-		LoadSkinChanger(tRead);
+        if(!LoadSkinChanger(tRead)) throw std::runtime_error("Missing SkinChanger section");
 
 		m_sCurrentSkins = sConfigName;
+        m_bUseSkinProfile=true;
 		SaveState();
 		if (bNotify)
 			SDK::Output("SixBox", std::format("Skin config {} loaded", sConfigName).c_str(), INFO_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_INFO);
@@ -1487,9 +1550,11 @@ bool CConfigs::LoadSkins(const std::string& sConfigName, bool bNotify)
 	{
 		if (bTransaction)
 		{
-			F::SkinChanger.SetSkins(std::move(mOldSkins));
-			F::SkinChanger.SetBackpack(std::move(tOldBackpack));
-			F::SkinChanger.SetLoadout(std::move(mOldLoadout));
+            F::SkinChanger.SetProfile(std::move(oldProfile));
+            Vars::Visuals::SkinChanger::Enabled.Map=oldEnabled;
+            Vars::Visuals::SkinChanger::AllowUnsupported.Map=oldUnsupported;
+            F::Binds.SetVars(nullptr,nullptr,false);
+            m_bUseSkinProfile=oldUseSkinProfile;
 			m_sCurrentSkins = sOldCurrentSkins;
 		}
 		SDK::Output("SixBox", "Load skins failed", ERROR_COLOR, OUTPUT_CONSOLE | OUTPUT_TOAST | OUTPUT_MENU | OUTPUT_DEBUG, ICON_MD_CANCEL);
@@ -1524,9 +1589,8 @@ void CConfigs::ResetSkins(const std::string& sConfigName, bool bNotify)
 
 	try
 	{
-		F::SkinChanger.SetSkins({});
-		F::SkinChanger.ClearBackpack();
-		F::SkinChanger.SetLoadout({});
+        std::scoped_lock settings(F::Binds.m_mMutex);
+        F::SkinChanger.SetProfile({});
 
 		SaveSkins(sConfigName, false);
 

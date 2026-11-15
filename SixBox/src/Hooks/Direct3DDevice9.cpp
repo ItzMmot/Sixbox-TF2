@@ -2,6 +2,7 @@
 #include "Direct3DDevice9.h"
 #include "../Features/ImGui/Background/MenuBackground.h"
 #include "../Features/Visuals/Aura/Aura.h"
+#include "../Features/Visuals/Karaoke/Karaoke.h"
 
 #include "../SDK/SDK.h"
 #include "../Features/ImGui/Render.h"
@@ -25,6 +26,7 @@ MAKE_HOOK(Direct3DDevice9_Present, U::Memory.GetVirtual(I::DirectXDevice, 17), H
 	else
 	{
 		F::MenuBackground.ReleaseDevice();
+    F::Karaoke.ReleaseDevice();
 		F::Aura.Release();
 		F::CaptureOverlay.ReleaseDeviceObjects();
 		F::SteamProfileCache.ReleaseTextures();
@@ -39,6 +41,7 @@ MAKE_HOOK(Direct3DDevice9_Reset, U::Memory.GetVirtual(I::DirectXDevice, 16), HRE
 	DEBUG_RETURN(Direct3DDevice9_Reset, pDevice, pPresentationParameters);
 
 	F::MenuBackground.ReleaseDevice();
+    F::Karaoke.ReleaseDevice();
 
 	F::Aura.Release();
 	F::CaptureOverlay.ReleaseDeviceObjects();

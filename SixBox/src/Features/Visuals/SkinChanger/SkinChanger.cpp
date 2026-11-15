@@ -1,6 +1,9 @@
 #include "../../Configs/Configs.h"
 #include "SkinChanger.h"
 #include "SkinData.h"
+#include "InventoryWeaponPolicy.h"
+#include "GoldKillPolicy.h"
+#include "WeaponModelPolicy.h"
 #include "CrateLootData.h"
 #include "../../Misc/AutoItem/AutoItem.h"
 
@@ -16,6 +19,50 @@
 
 #ifndef TEXTMODE
 
+namespace
+{
+    struct GoldWeapon
+    {
+        int weaponID = -1;
+        GoldKillPolicy::Kind kind = GoldKillPolicy::Kind::None;
+    };
+    std::array<GoldWeapon, MAX_WEAPONS> s_goldWeapons = {};
+    GoldKillPolicy::Deaths s_goldDeaths;
+    struct PendingGoldRagdoll
+    {
+        CHandle<CTFRagdoll> entity;
+        void(__fastcall* create)(void*) = nullptr;
+        float queued = 0.f;
+    };
+    std::array<PendingGoldRagdoll, 129> s_goldPending = {};
+
+    int RagdollUserID(CTFRagdoll* ragdoll)
+    {
+        player_info_t info = {};
+        return I::EngineClient->GetPlayerInfo(ragdoll->m_iPlayerIndex(), &info) ? info.userID : 0;
+    }
+
+    void FinishRagdoll(CTFRagdoll* ragdoll, void(__fastcall* create)(void*), bool gold)
+    {
+        if (Vars::Visuals::Removals::Ragdolls.Value && !SDK::CleanScreenshot()) return;
+        const int effects = Vars::Visuals::Effects::RagdollEffects.Value;
+        if (!SDK::CleanScreenshot() && (gold || effects))
+        {
+            using namespace Vars::Visuals::Effects::RagdollEffectsEnum;
+            ragdoll->m_bGib() = false;
+            ragdoll->m_bBurning() = !gold && (effects & Burning);
+            ragdoll->m_bElectrocuted() = !gold && (effects & Electrocuted);
+            ragdoll->m_bBecomeAsh() = !gold && (effects & Ash);
+            ragdoll->m_bDissolving() = !gold && (effects & Dissolve);
+            ragdoll->m_bGoldRagdoll() = gold || (effects & Gold);
+            ragdoll->m_bIceRagdoll() = !gold && (effects & Ice);
+        }
+        if (gold && !SDK::CleanScreenshot())
+            ragdoll->m_iDamageCustom() = TF_DMG_CUSTOM_GOLD_WRENCH;
+        create(ragdoll);
+    }
+}
+
 MAKE_SIGNATURE(CEconItemSchema_GetAttributeDefinition, "client.dll", "85 D2 78 ? 3B 91 E8 02 00 00 7D ? 48 8B 81 D8 02 00 00 8B D2 48 8B 04 D0 C3 33 C0 C3", 0x0);
 MAKE_SIGNATURE(CAttributeList_SetRuntimeAttributeValue, "client.dll", "48 89 5C 24 10 55 56 57 48 8B EC 48 83 EC 50 44", 0x0);
 MAKE_SIGNATURE(CEconItemView_Constructor, "client.dll", "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 20 48 8D 05 ? ? ? ? 66 C7 41 10 FF FF 48 89 01 48 8B F9 48 8D 05", 0x0);
@@ -28,6 +75,8 @@ MAKE_SIGNATURE(CTFPlayerInventory_GetMaxItems, "client.dll", "40 53 48 83 EC ? 4
 MAKE_SIGNATURE(CCrateLootListWrapper_InitSeriesCall, "client.dll", "E8 ? ? ? ? 84 C0 75 1E 48 8B D7 48 8D 4C 24 68 E8 ? ? ? ? 84 C0 75 0D 48 8B D7 48 8D 4C 24 68 E8", 0x0);
 MAKE_SIGNATURE(CCrateLootListWrapper_InitName, "client.dll", "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40 8B 05 ? ? ? ? 48 8B FA 48 8B F1 A8 01 75 26", 0x0);
 MAKE_SIGNATURE(CCrateLootListWrapper_InitLineItems, "client.dll", "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B FA 48 8B D9 E8 ? ? ? ? 8B 70 08 39 35 ? ? ? ? 74", 0x0);
+
+MAKE_SIGNATURE(Inventory_WorldModelCacheField, "client.dll", "8B 87 ? ? ? ? 85 C0 75 ? 48 8B 05 ? ? ? ? 48 8B CF 48 8B 18 48 8B 07 FF 90 ? ? ? ? 48 8B 0D ? ? ? ? 48 8B D0 FF 53 10 89 87", 0x0);
 
 MAKE_SIGNATURE(CTFWearable_Constructor, "client.dll", "40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? C6 83 A0 0E 00 00 00 48 8D 05", 0x0);
 MAKE_SIGNATURE(MemAlloc_Zero, "client.dll", "48 89 5C 24 08 57 48 83 EC 20 48 8B 05 ? ? ? ? 48 8B F9 48 8B D7 48 8B 08 48 8B 01 FF 50 08 4C 8B C7 33 D2 48 8B C8 48 8B D8 E8", 0x0);
@@ -70,6 +119,7 @@ namespace
 		case Pyro_s_PyrosShotgun:
 		case Heavy_s_HeavysShotgun:
 		case Engi_m_EngineersShotgun: return Soldier_s_ShotgunR;
+		case Heavy_t_Fists: return Heavy_t_FistsR;
 		case Scout_t_Bat: return Scout_t_BatR;
 		case Soldier_t_Shovel: return Soldier_t_ShovelR;
 		case Pyro_t_FireAxe: return Pyro_t_FireAxeR;
@@ -140,6 +190,7 @@ namespace
 	}
 
 	std::array<uint16_t, 65536> s_aSchemaWeaponTypes = {};
+	std::array<bool, 65536> s_aSharedMelee = {};
 
 	int StaticWeaponType(int iDef)
 	{
@@ -195,14 +246,16 @@ namespace
 	}
 
 	int StockWeaponForSlot(int iClass, int iSlot)
-	{
-		static constexpr int aStock[10][3] = {
-			{ -1, -1, -1 }, { 13, 23, 0 }, { 14, 16, 3 }, { 18, 10, 6 },
-			{ 19, 20, 1 }, { 17, 29, 8 }, { 15, 11, 5 }, { 21, 12, 2 },
-			{ 24, -1, 4 }, { 9, 22, 7 }
-		};
-		return iClass >= 1 && iClass <= 9 && iSlot >= 0 && iSlot < 3 ? aStock[iClass][iSlot] : -1;
-	}
+    {
+        return InventoryWeaponPolicy::Stock(iClass, iSlot);
+    }
+
+    int LoadoutWeaponType(int iDef, int iClass, int iSlot)
+    {
+        const bool shared = iDef == Misc_t_Saxxy || iDef == Misc_t_GoldFryingPan || iDef == Misc_t_FryingPan || (iDef >= 0 && iDef < 65536 && s_aSharedMelee[iDef]);
+        const int resolved = InventoryWeaponPolicy::Resolve(iDef, shared, iClass, iSlot);
+        return resolved < 0 ? -1 : WeaponType(resolved);
+    }
 
 	int TemplateDef(const SkinData::Kit_t& tKit, int iBaseDef)
 	{
@@ -618,6 +671,24 @@ void CSkinChanger::SetSkins(std::unordered_map<int, Skin_t> mSkins)
 	m_mSkins = std::move(mSkins);
 }
 
+SkinProfile_t CSkinChanger::GetProfile()
+{
+    std::lock_guard lock(m_tMutex);
+    return {m_mSkins,m_vBackpack,m_mLoadout};
+}
+
+void CSkinChanger::SetProfile(SkinProfile_t profile)
+{
+    std::lock_guard lock(m_tMutex);
+    m_mSkins.swap(profile.skins);
+    m_vBackpack.swap(profile.backpack);
+    m_mLoadout.swap(profile.loadout);
+    m_uNextSerial=1;
+    for(const auto& item:m_vBackpack)
+        if(item.uSerial<0xFFFFFFu) m_uNextSerial=(std::max)(m_uNextSerial,item.uSerial+1);
+    m_bInventoryLoaded=false;
+}
+
 #ifndef TEXTMODE
 
 void CSkinChanger::ScheduleRefresh()
@@ -755,10 +826,12 @@ void CSkinChanger::Service()
 		}
 	}
 
+	FlushGoldRagdolls();
 	SyncInventory();
 	RunFrame();
 	UpdateWeaponVisuals(bInGame ? H::Entities.GetLocal() : nullptr);
 	UpdateWearables(bInGame ? H::Entities.GetLocal() : nullptr);
+    CacheGoldWeapons(bInGame ? H::Entities.GetLocal() : nullptr);
 }
 
 void CSkinChanger::RequestFullUpdate()
@@ -1009,9 +1082,10 @@ namespace
 	constexpr float kClientThinkAlways = -1293.f;
 	constexpr size_t kTFWearableSize = 0xEE0;
 
-	constexpr int kLoadoutHead = 7;
-	constexpr int kLoadoutMisc = 8;
-	constexpr int kLoadoutMisc2 = 11;
+	constexpr int kLoadoutHead = LOADOUT_POSITION_HEAD;
+	constexpr int kLoadoutMisc = LOADOUT_POSITION_MISC;
+	constexpr int kLoadoutMisc2 = LOADOUT_POSITION_MISC2;
+    static_assert(kLoadoutHead==7&&kLoadoutMisc==8&&kLoadoutMisc2==10);
 
 	struct ServerWeaponChoice_t
 	{
@@ -1027,12 +1101,27 @@ namespace
 		alignas(16) uint8_t aOriginal[SIZE_OF_ITEMVIEW] = {};
 		uint64_t uClientID = 0;
 		int iStyle = -1;
+        int iWorldModel = 0, iViewModel = 0;
+        uint64_t uNextModelAttempt = 0;
 		uint64_t uNextExtraAttempt = 0;
 		CHandle<CEconWearable> hExtraWorld, hExtraVM;
 		EHANDLE hOriginalExtraWorld, hOriginalExtraVM;
 		bool bConstructed = false;
 	};
 	std::array<WeaponVisual_t, MAX_WEAPONS> s_aWeaponVisuals = {};
+
+    CEconItemView* WearableItemView(CEconWearable* entity)
+    {
+        if(!entity)return nullptr;
+        static int offset=-1;
+        if(offset<0)
+        {
+            // Resolve this entity family from its own receive table.
+            const int definition=U::NetVars.GetNetVar("CTFWearable","m_iItemDefinitionIndex");
+            offset=WearableLoadoutPolicy::ItemViewOffset(definition,int(kTFWearableSize),SIZE_OF_ITEMVIEW);
+        }
+        return offset>=0?reinterpret_cast<CEconItemView*>(uintptr_t(entity)+offset):nullptr;
+    }
 
 	bool ResizeWearables(CTFPlayer* pPlayer, int iCount)
 	{
@@ -1753,7 +1842,7 @@ void* CSkinChanger::GetClientSOCData(uint64_t uItemID)
 	return it != m_mClientItemsByID.end() ? it->second : nullptr;
 }
 
-uint64_t CSkinChanger::FindOwnedWeapon(uint64_t uClientItemID)
+uint64_t CSkinChanger::FindOwnedWeapon(uint64_t uClientItemID, int iClass, int iSlot)
 {
 	auto* pInventory = GetLocalInventory();
 	auto* pSelected = FindItemView(pInventory, uClientItemID);
@@ -1761,14 +1850,20 @@ uint64_t CSkinChanger::FindOwnedWeapon(uint64_t uClientItemID)
 		return 0;
 	const uint16_t iSelectedDef = Field<uint16_t>(pSelected, kViewDefIndex);
 	const auto* pInfo = FindItemInfo(iSelectedDef);
-	if (!pInfo || !pInfo->sClass.starts_with("tf_weapon_"))
+	if (!pInfo || !InventoryWeaponPolicy::IsWeapon(pInfo->sClass))
 		return 0;
 
-	const int iType = WeaponType(iSelectedDef);
+	const int iType = LoadoutWeaponType(iSelectedDef, iClass, iSlot);
+	if (iType < 0)
+		return 0;
 	const bool bReskin = iSelectedDef != iType;
 	auto* pData = Field<uint8_t*>(pInventory, kInventoryItemsData);
 	const int iCount = Field<int>(pInventory, kInventoryItemsCount);
 	uint64_t uExact = 0, uEquivalent = 0;
+    uint64_t uPanChoice = 0;
+    int iPanRank = 2;
+    const auto* pPanInfo = iSelectedDef == Misc_t_GoldFryingPan ? FindItemInfo(Misc_t_FryingPan) : nullptr;
+    const bool bPanAllowed = InventoryWeaponPolicy::PanAllowed(iClass, pPanInfo ? pPanInfo->uClassMask : 0);
 	for (int i = 0; pData && i < iCount; i++)
 	{
 		auto* pView = reinterpret_cast<CEconItemView*>(pData + size_t(i) * kEconItemViewSize);
@@ -1776,11 +1871,19 @@ uint64_t CSkinChanger::FindOwnedWeapon(uint64_t uClientItemID)
 		if (!uID || uID == ~0ull || IsClientItem(uID))
 			continue;
 		const uint16_t iDef = Field<uint16_t>(pView, kViewDefIndex);
+        const int rank = InventoryWeaponPolicy::OwnedRank(iSelectedDef, iDef,
+            iDef == iType || RedirectIndex(iDef) == iType, bPanAllowed);
+        if (rank >= 0 && (rank < iPanRank || (rank == iPanRank && (!uPanChoice || uID < uPanChoice))))
+        {
+            iPanRank = rank;
+            uPanChoice = uID;
+        }
 		if (iDef == iSelectedDef && (!uExact || uID < uExact))
 			uExact = uID;
 		if ((iDef == iType || RedirectIndex(iDef) == iType) && (!uEquivalent || uID < uEquivalent))
 			uEquivalent = uID;
 	}
+    if (iSelectedDef == Misc_t_GoldFryingPan) return uPanChoice;
 	return bReskin ? uEquivalent : (uExact ? uExact : uEquivalent);
 }
 
@@ -1931,12 +2034,12 @@ void CSkinChanger::ReapplyLoadout(CTFPlayerInventory* pInventory)
 			{
 				const uint64_t uPreviousOwned = tChoice.uOwnedID;
 				const uint64_t uPreviousClient = tChoice.uClientID;
-				tChoice = { uItemID, FindOwnedWeapon(uItemID), iCount };
+				tChoice = { uItemID, FindOwnedWeapon(uItemID, iClass, iSlot), iCount };
 				if (!tChoice.uOwnedID)
 				{
 					const int iStock = StockWeaponForSlot(iClass, iSlot);
 					auto* pSelected = FindItemView(pInventory, uItemID);
-					if (iStock >= 0 && pSelected && WeaponType(iStock) == WeaponType(Field<uint16_t>(pSelected, kViewDefIndex)))
+					if (iStock >= 0 && pSelected && WeaponType(iStock) == LoadoutWeaponType(Field<uint16_t>(pSelected, kViewDefIndex), iClass, iSlot))
 						tChoice.uOwnedID = ~0ull;
 				}
 				if (tChoice.uOwnedID && (tChoice.uOwnedID != uPreviousOwned || uPreviousClient != uItemID))
@@ -2258,6 +2361,94 @@ namespace
 			pWeapon->m_hExtraWearableViewModel().Set(tVisual.hExtraVM.Get());
 	}
 
+    int WorldModelCacheOffset()
+    {
+        static const int offset = []
+        {
+            const auto address = S::Inventory_WorldModelCacheField();
+            return address && IsReadableMemory(reinterpret_cast<void*>(address), 51)
+                ? WeaponModelPolicy::WorldCacheOffset({reinterpret_cast<const uint8_t*>(address), 51}) : 0;
+        }();
+        return offset;
+    }
+
+    void ApplyActiveViewModel(CTFWeaponBase* weapon, int modelIndex)
+    {
+        auto* owner = weapon->GetOwnerEntity();
+        auto* local = H::Entities.GetLocal();
+        if (!local || owner != local || local->m_hActiveWeapon().Get() != weapon
+            || local->InCond(TF_COND_TAUNTING) || modelIndex <= 0) return;
+        auto* viewModel = local->m_hViewModel().Get();
+        if (!viewModel || viewModel->m_nModelIndex() == modelIndex) return;
+        auto* model = I::ModelInfoClient->GetModel(modelIndex);
+        const char* path = model ? I::ModelInfoClient->GetModelName(model) : nullptr;
+        if (path && *path)
+        {
+            S::Inventory_CBaseEntity_SetModel.Call<bool>(viewModel, path);
+            viewModel->As<CBaseAnimating>()->InvalidateBoneCache();
+            weapon->UpdateAllViewmodelAddons();
+        }
+    }
+
+    void RefreshWeaponModels(CTFWeaponBase* weapon)
+    {
+        if (!I::ModelInfoClient || !S::Inventory_CBaseEntity_SetModel()) return;
+        auto* owner = weapon->GetOwnerEntity();
+        if (!owner || !owner->IsPlayer()) return;
+        auto* player = owner->As<CTFPlayer>();
+        if (player->InCond(TF_COND_TAUNTING)) return;
+        // Native GetWorldModel honors model_world overrides (e.g. Hot Hand),
+        // unlike GetPlayerDisplayModel used by cosmetics. Slot 320 is verified
+        // beside GetViewModel in the current x64 C_TFShovel vtable.
+        const char* world = U::Memory.CallVirtual<320, const char*>(weapon);
+        if (world && *world)
+        {
+            I::ModelInfoClient->RegisterDynamicModel(world, true);
+            if (const int offset = WorldModelCacheOffset()) Field<int>(weapon, offset) = 0;
+            weapon->GetWorldModelIndex(); // Recompute the engine cache using the selected econ item.
+            S::Inventory_CBaseEntity_SetModel.Call<bool>(weapon, world);
+        }
+        // All-class c_models need class hands instead of the stock v_shovel/v_bat.
+        // This is the native UpdateHands operation, also used when restoring an item.
+        const char* hands = weapon->GetWeaponViewModel(0);
+        if (hands && *hands)
+        {
+            I::ModelInfoClient->RegisterDynamicModel(hands, true);
+            const int index = I::ModelInfoClient->GetModelIndex(hands);
+            if (index > 0)
+            {
+                weapon->m_iViewModelIndex() = index;
+                ApplyActiveViewModel(weapon, index);
+            }
+        }
+    }
+
+    void KeepWeaponModels(WeaponVisual_t& visual, CTFWeaponBase* weapon)
+    {
+        auto* owner = weapon->GetOwnerEntity();
+        if (!owner || !owner->IsPlayer() || owner->As<CTFPlayer>()->InCond(TF_COND_TAUNTING)) return;
+        if ((visual.iWorldModel <= 0 || visual.iViewModel <= 0) && GetTickCount64() >= visual.uNextModelAttempt)
+        {
+            visual.uNextModelAttempt = GetTickCount64() + 1000;
+            RefreshWeaponModels(weapon);
+            weapon->GetClientNetworkable()->OnDataChanged(DATA_UPDATE_DATATABLE_CHANGED);
+            weapon->UpdateAllViewmodelAddons();
+            visual.iWorldModel = weapon->m_iWorldModelIndex();
+            visual.iViewModel = weapon->m_iViewModelIndex();
+        }
+        // Network/prediction can restore server indices without changing the client item ID.
+        if (visual.iWorldModel > 0)
+        {
+            weapon->m_iWorldModelIndex() = visual.iWorldModel;
+            if (const int offset = WorldModelCacheOffset()) Field<int>(weapon, offset) = visual.iWorldModel;
+        }
+        if (visual.iViewModel > 0)
+        {
+            weapon->m_iViewModelIndex() = visual.iViewModel;
+            ApplyActiveViewModel(weapon, visual.iViewModel);
+        }
+    }
+
 	void RefreshWeaponVisual(CTFWeaponBase* pWeapon)
 	{
 		auto& hAttachment = Field<CHandle<CBaseAnimating>>(pWeapon, 0xE50);
@@ -2267,6 +2458,7 @@ namespace
 		}
 		hAttachment.Term();
 		S::CEconEntity_InitializeAttributes.Call<void>(pWeapon);
+        RefreshWeaponModels(pWeapon);
 		pWeapon->GetClientNetworkable()->OnDataChanged(DATA_UPDATE_DATATABLE_CHANGED);
 		pWeapon->UpdateAttachmentModels();
 		pWeapon->UpdateAllViewmodelAddons();
@@ -2299,6 +2491,8 @@ namespace
 		RestoreExtraWearable(&tVisual.hExtraVM);
 		RestoreExtraWearable(&tVisual.hExtraWorld);
 		tVisual.iStyle = -1;
+        tVisual.iWorldModel = tVisual.iViewModel = 0;
+        tVisual.uNextModelAttempt = 0;
 		tVisual.uNextExtraAttempt = 0;
 		if (auto* pWeapon = tVisual.bConstructed ? tVisual.hEntity.Get() : nullptr)
 		{
@@ -2306,8 +2500,10 @@ namespace
 			if (ViewItemID(pView) == tVisual.uClientID)
 			{
 				AssignItemView(pView, reinterpret_cast<CEconItemView*>(tVisual.aOriginal));
-				RefreshWeaponVisual(pWeapon);
 			}
+            // The server may already have restored the econ view, while our model
+            // cache still contains the client item. Rebuild in either case.
+            RefreshWeaponVisual(pWeapon);
 		}
 		if (tVisual.bConstructed)
 			DestroyItemView(tVisual.aOriginal);
@@ -2330,6 +2526,22 @@ void CSkinChanger::RestoreWeaponVisuals()
 		}
 		ResetWeaponVisual(tVisual);
 	}
+}
+
+void CSkinChanger::PrepareWeaponDeploy(CTFWeaponBase* weapon)
+{
+    auto* entity = I::EngineClient && I::ClientEntityList
+        ? I::ClientEntityList->GetClientEntity(I::EngineClient->GetLocalPlayer()) : nullptr;
+    auto* local = entity ? entity->As<CTFPlayer>() : nullptr;
+    if (!weapon || !local || !local->IsPlayer() || weapon->GetOwnerEntity() != local || G::Unload
+        || !Vars::Visuals::SkinChanger::Enabled.Value || SDK::CleanScreenshot()) return;
+    // Deploy selects hand activities and emits draw sounds before FRAME_RENDER_START.
+    // Preparing only at render time leaves the server weapon's animation/sound selected.
+    static bool preparing = false;
+    if (preparing) return;
+    preparing = true;
+    UpdateWeaponVisuals(local);
+    preparing = false;
 }
 
 void CSkinChanger::UpdateWeaponVisuals(CTFPlayer* pLocal)
@@ -2393,10 +2605,12 @@ void CSkinChanger::UpdateWeaponVisuals(CTFPlayer* pLocal)
 			continue;
 		const uint16_t iSelectedDef = Field<uint16_t>(pSelected, kViewDefIndex);
 		const uint16_t iOriginalDef = Field<uint16_t>(pView, kViewDefIndex);
-		if (WeaponType(iSelectedDef) != WeaponType(iOriginalDef))
+		if (LoadoutWeaponType(iSelectedDef, iClass, iSlot) < 0
+            || LoadoutWeaponType(iSelectedDef, iClass, iSlot) != LoadoutWeaponType(iOriginalDef, iClass, iSlot))
 			continue;
 		if (tVisual.bConstructed && ViewItemID(pView) == uSelected)
 		{
+            KeepWeaponModels(tVisual, pWeapon);
 			UpdateWeaponExtras(tVisual, pLocal, pWeapon, iSelectedDef);
 			continue;
 		}
@@ -2411,6 +2625,8 @@ void CSkinChanger::UpdateWeaponVisuals(CTFPlayer* pLocal)
 		tVisual.hOriginalExtraVM = pWeapon->m_hExtraWearableViewModel();
 		AssignItemView(pView, pSelected);
 		RefreshWeaponVisual(pWeapon);
+        tVisual.iWorldModel = pLocal->InCond(TF_COND_TAUNTING) ? 0 : pWeapon->m_iWorldModelIndex();
+        tVisual.iViewModel = pLocal->InCond(TF_COND_TAUNTING) ? 0 : pWeapon->m_iViewModelIndex();
 		UpdateWeaponExtras(tVisual, pLocal, pWeapon, iSelectedDef);
 	}
 }
@@ -2461,7 +2677,7 @@ CEconItemView* CSkinChanger::GetWearableView(int iClass, int iSlot, int iTeam, i
 
 CEconWearable* CSkinChanger::CreateWearable(CTFPlayer* pLocal, CEconItemView* pView, int iClass, int iTeam)
 {
-	if (!pLocal || !pView || !S::CTFWearable_Constructor() || !S::CEconEntity_InitializeAttributes()
+	if (!pLocal || !pView || !S::CTFWearable_Constructor()
 		|| !S::CEconItemView_GetPlayerDisplayModel() || !S::CBaseEntity_SetOwnerEntity() || !S::MemAlloc_Zero())
 		return nullptr;
 
@@ -2473,8 +2689,11 @@ CEconWearable* CSkinChanger::CreateWearable(CTFPlayer* pLocal, CEconItemView* pV
 	if (!pWearable)
 		return nullptr;
 
-	AssignItemView(reinterpret_cast<CEconItemView*>(uintptr_t(pWearable) + kEconEntityAttrManager + kAttrContainerItem), pView);
-	*reinterpret_cast<byte*>(uintptr_t(pWearable) + kEconEntityClientside) = 1;
+    auto* entityView=WearableItemView(pWearable);
+    if(!entityView){pWearable->ReleaseClientEntity();return nullptr;}
+    AssignItemView(entityView,pView);
+    // CEconEntity::InitializeAsClientEntity sets its own client-side flag.
+    // No duplicate write into a hard-coded private field is needed.
 	S::CBaseEntity_SetOwnerEntity.Call<void>(pWearable, pLocal);
 
 	if (!pWearable->InitializeAsClientEntity(sModel, kRenderGroupOpaqueEntity))
@@ -2518,6 +2737,7 @@ void CSkinChanger::RemoveWearable(CTFPlayer* pLocal, Wearable_t& tWearable)
 {
 	auto* pEntity = tWearable.hEntity.Get();
 	tWearable.hEntity.Term();
+    tWearable.uItemID=0;
 	tWearable.iDef = -1;
 	tWearable.iClass = -1;
 	tWearable.iTeam = -1;
@@ -2552,89 +2772,111 @@ void CSkinChanger::RemoveWearable(CTFPlayer* pLocal, Wearable_t& tWearable)
 
 void CSkinChanger::ResetWearables(CTFPlayer* pLocal)
 {
-	RestoreHiddenWearables();
-	auto* pOwner = pLocal ? pLocal : m_hWearableOwner.Get();
-	bool bAny = false;
-	for (auto& tWearable : m_aWearables)
-	{
-		bAny = bAny || tWearable.hEntity.Get() != nullptr;
-		RemoveWearable(pOwner, tWearable);
-	}
-
-	if (bAny && pOwner)
-	{
-		pOwner->SetBodygroupsDirty();
-		RefreshInventoryHudModel();
-	}
-	m_hWearableOwner.Term();
+    auto* owner=m_hWearableOwner.Get();if(!owner)owner=pLocal;
+    bool changed=false;
+    // Free client slots and remove their providers before restoring server items.
+    for(auto& wearable:m_aWearables)
+    {changed|=wearable.hEntity.Get()!=nullptr;RemoveWearable(owner,wearable);}
+    for(const auto& hidden:m_aHiddenWearables)changed|=hidden.hEntity.Get()!=nullptr;
+    RestoreHiddenWearables();
+    m_tWearableSelection={};m_iWearableClass=m_iWearableTeam=0;
+    if(changed&&owner)
+    {owner->UpdateWearables();owner->SetBodygroupsDirty();RefreshInventoryHudModel();}
+    m_hWearableOwner.Term();
 }
 
 void CSkinChanger::ClearWearables()
 {
-	RestoreHiddenWearables();
-	for (auto& tWearable : m_aWearables)
-		tWearable = {};
-	for (auto& uKey : m_aWearableViewKey)
-		uKey = 0;
-	m_hWearableOwner.Term();
+    ResetWearables(m_hWearableOwner.Get());
+    for(auto& key:m_aWearableViewKey)key=0;
 }
 
 void CSkinChanger::RestoreHiddenWearables()
 {
-	for (auto& hWearable : m_aHiddenWearables)
-	{
-		if (auto* pWearable = hWearable.Get())
-			pWearable->m_fEffects() &= ~EF_NODRAW;
-		hWearable.Term();
-	}
+    for(auto& hidden:m_aHiddenWearables)
+    {
+        auto* entity=hidden.hEntity.Get();auto* owner=hidden.hOwner.Get();
+        if(!entity){hidden={};continue;}
+        // Never reparent an entity the server has already given to someone else.
+        if(owner&&(!entity->GetOwnerEntity()||entity->GetOwnerEntity()==owner))
+        {
+            if(!AppendWearable(owner,entity))continue;
+            entity->Equip(owner);
+            entity->GetClientNetworkable()->OnDataChanged(DATA_UPDATE_DATATABLE_CHANGED);
+        }
+        if(hidden.bWasHidden)entity->m_fEffects()|=EF_NODRAW;
+        else entity->m_fEffects()&=~EF_NODRAW;
+        hidden={};
+    }
 }
 
-void CSkinChanger::HideReplacedWearables(CTFPlayer* pLocal, int iClass)
+bool CSkinChanger::HideReplacedWearables(CTFPlayer* local,int /*playerClass*/)
 {
-	RestoreHiddenWearables();
-	std::array<uint64_t, kLoadoutSlots> aOriginalIDs = {};
-	{
-		std::lock_guard tLock(m_tMutex);
-		for (int iSlot = kLoadoutHead; iSlot <= kLoadoutMisc2; iSlot++)
-		{
-			if (!m_aWearables[iSlot].hEntity.Get())
-				continue;
-			const auto it = m_mOriginalLoadout.find(iClass * kLoadoutSlots + iSlot);
-			if (it != m_mOriginalLoadout.end())
-				aOriginalIDs[iSlot] = it->second;
-		}
-	}
-
-	size_t uHidden = 0;
-	auto& vWearables = pLocal->m_hMyWearables();
-	for (int i = 0; i < vWearables.Count() && uHidden < m_aHiddenWearables.size(); i++)
-	{
-		auto* pWearable = vWearables[i].Get();
-		if (!pWearable || (pWearable->m_fEffects() & EF_NODRAW))
-			continue;
-		auto* pView = reinterpret_cast<CEconItemView*>(uintptr_t(pWearable) + kEconEntityAttrManager + kAttrContainerItem);
-		const uint64_t uID = ViewItemID(pView);
-		if (!uID || std::find(aOriginalIDs.begin(), aOriginalIDs.end(), uID) == aOriginalIDs.end())
-			continue;
-		pWearable->m_fEffects() |= EF_NODRAW;
-		m_aHiddenWearables[uHidden++].Set(pWearable);
-	}
+    bool changed=false;
+    auto detachHandle=[&](int handle)
+    {
+        auto& list=local->m_hMyWearables();
+        std::array<CHandle<CEconWearable>,32> kept{};
+        if(list.Count()>int(kept.size()))
+        {SDK::Output("Inventory changer","Wearable list exceeds the reconciliation limit.",WARNING_COLOR);return;}
+        int count=0;
+        for(int i=0;i<list.Count();++i)if(list[i].ToInt()!=handle)kept[count++]=list[i];
+        if(count==list.Count())return;
+        if(!ResizeWearables(local,count))
+        {SDK::Output("Inventory changer","Cannot resize the local wearable list; will retry.",WARNING_COLOR);return;}
+        for(int i=0;i<count;++i)list[i]=kept[i];
+        changed=true;
+    };
+    // Network updates can reattach a suppressed entity without changing its ID.
+    for(auto& hidden:m_aHiddenWearables)
+    {
+        auto* entity=hidden.hEntity.Get();
+        if(!entity){hidden={};continue;}
+        if(hidden.hOwner.Get()!=local)continue;
+        if(auto* owner=entity->GetOwnerEntity();owner&&owner!=local)
+        {
+            if(!hidden.bWasHidden)entity->m_fEffects()&=~EF_NODRAW;
+            hidden={};continue;
+        }
+        if(entity->GetOwnerEntity()==local){entity->UnEquip(local);changed=true;}
+        entity->m_fEffects()|=EF_NODRAW;
+        detachHandle(entity->GetRefEHandle().ToInt());
+    }
+    auto& list=local->m_hMyWearables();
+    for(int i=list.Count()-1;i>=0;--i)
+    {
+        auto* entity=list[i].Get();if(!entity)continue;
+        bool ours=false;
+        for(const auto& wearable:m_aWearables)if(wearable.hEntity.Get()==entity){ours=true;break;}
+        if(ours||entity->IsWearableVM())continue;
+        if(auto* owner=entity->GetOwnerEntity();owner&&owner!=local)continue;
+        auto* view=WearableItemView(entity);
+        if(!view)continue;
+        const auto* info=FindItemInfo(Field<uint16_t>(view,kViewDefIndex));
+        // Gunboats, shields, Razorback, parachutes and weapon attachments stay.
+        if(!info||!info->bCosmetic)continue;
+        auto free=std::find_if(m_aHiddenWearables.begin(),m_aHiddenWearables.end(),
+            [](const HiddenWearable_t& hidden){return !hidden.hEntity.Get();});
+        if(free==m_aHiddenWearables.end())
+        {
+            SDK::Output("Inventory changer","Cannot track another suppressed cosmetic; keeping its entity intact.",WARNING_COLOR);
+            break;
+        }
+        free->hEntity.Set(entity);free->hOwner.Set(local);free->bWasHidden=bool(entity->m_fEffects()&EF_NODRAW);
+        entity->UnEquip(local); // Removes attribute provision and invalidates caches.
+        entity->m_fEffects()|=EF_NODRAW;
+        detachHandle(entity->GetRefEHandle().ToInt());changed=true;
+        i=std::min(i,list.Count());
+    }
+    return changed;
 }
 
-bool CSkinChanger::IsReplacedWearableItem(uint64_t uItemID)
+bool CSkinChanger::IsReplacedWearableItem(uint64_t itemID)
 {
-	if (!uItemID || IsClientItem(uItemID))
-		return false;
-	for (const auto& hWearable : m_aHiddenWearables)
-	{
-		auto* pWearable = hWearable.Get();
-		if (!pWearable)
-			continue;
-		auto* pView = reinterpret_cast<CEconItemView*>(uintptr_t(pWearable) + kEconEntityAttrManager + kAttrContainerItem);
-		if (ViewItemID(pView) == uItemID)
-			return true;
-	}
-	return false;
+    if(!itemID||!m_tWearableSelection.managed||IsClientItem(itemID)||m_tWearableSelection.Contains(itemID))return false;
+    auto* view=FindItemView(GetLocalInventory(),itemID);
+    const auto* info=view?FindItemInfo(Field<uint16_t>(view,kViewDefIndex)):nullptr;
+    return info&&info->bCosmetic;
 }
 
 void CSkinChanger::UpdateWearables(CTFPlayer* pLocal)
@@ -2653,10 +2895,10 @@ void CSkinChanger::UpdateWearables(CTFPlayer* pLocal)
 		return;
 	}
 
-	if (auto* pOwner = m_hWearableOwner.Get(); pOwner && pOwner != pLocal)
-		ResetWearables(pOwner);
-	m_hWearableOwner.Set(pLocal);
-
+    if(auto* owner=m_hWearableOwner.Get();owner&&(owner!=pLocal||m_iWearableClass!=pLocal->m_iClass()||m_iWearableTeam!=pLocal->m_iTeamNum()))
+    {
+        ResetWearables(owner);
+    }
 	const int iClass = pLocal->m_iClass();
 	const int iTeam = pLocal->m_iTeamNum();
 	if (iClass < 1 || iClass > 9)
@@ -2669,17 +2911,29 @@ void CSkinChanger::UpdateWearables(CTFPlayer* pLocal)
 	if (!pInventory)
 		return;
 
-	const bool bFullUpdate = I::ClientState && I::ClientState->m_nDeltaTick == -1;
-	bool bBodygroupsDirty = false;
-	for (int iSlot = kLoadoutHead; iSlot <= kLoadoutMisc2; iSlot++)
-	{
+    const auto selection=WearableLoadoutPolicy::Resolve(GetLoadout(),iClass,[&](int slot)
+    {
+        auto* view=pInventory->GetItemInLoadout(iClass,slot);
+        return view?ViewItemID(view):uint64_t(0);
+    },kLoadoutSlots);
+    if(!selection.managed){ResetWearables(pLocal);return;}
+    m_hWearableOwner.Set(pLocal);m_iWearableClass=iClass;m_iWearableTeam=iTeam;m_tWearableSelection=selection;
+    bool bBodygroupsDirty=HideReplacedWearables(pLocal,iClass);
+    // Remove any legacy cosmetic entities accidentally created in action/taunt slots.
+    for(int slot=0;slot<19;++slot)if(!WearableLoadoutPolicy::CosmeticSlot(slot)&&m_aWearables[slot].hEntity.Get())
+    {RemoveWearable(pLocal,m_aWearables[slot]);bBodygroupsDirty=true;}
+    for(std::size_t index=0;index<WearableLoadoutPolicy::Slots.size();++index)
+    {
+        const int iSlot=WearableLoadoutPolicy::Slots[index];
 		auto& tWearable = m_aWearables[iSlot];
 		auto* pEntity = tWearable.hEntity.Get();
 
-		auto* pLoadoutView = pInventory->GetItemInLoadout(iClass, iSlot);
-		const bool bClientItem = pLoadoutView && IsClientItem(pLoadoutView->UUID());
-		const int iDef = bClientItem ? pLoadoutView->GetDefinitionIndex() : 0;
-		if (iDef <= 0 || !IsWearableDef(uint16_t(iDef)))
+        const uint64_t selectedID=selection.items[index];
+        auto* pLoadoutView=selectedID?FindItemView(pInventory,selectedID):nullptr;
+        const bool bClientItem=pLoadoutView&&IsClientItem(selectedID);
+        const int iDef=pLoadoutView?pLoadoutView->GetDefinitionIndex():0;
+        const auto* info=iDef>0?FindItemInfo(uint16_t(iDef)):nullptr;
+        if(!info||!info->bCosmetic)
 		{
 			if (pEntity)
 			{
@@ -2689,14 +2943,14 @@ void CSkinChanger::UpdateWearables(CTFPlayer* pLocal)
 			continue;
 		}
 
-		const int iUnusual = GetItemUnusual(pLoadoutView->UUID());
+		const int iUnusual = bClientItem ? GetItemUnusual(selectedID) : 0;
 		auto* pAttributes = reinterpret_cast<CAttributeList*>(uintptr_t(pLoadoutView) + kItemViewAttributeList);
 		const int iPaintColor = int(pAttributes->GetValue(kAttrItemTint));
 		const int iPaintColor2 = int(pAttributes->GetValue(kAttrItemTint2));
 		const int iStyle = std::max(0, int(pAttributes->GetValue(kAttrStyleOverride)));
 		if (pEntity)
 		{
-			if (tWearable.iDef != iDef || tWearable.iClass != iClass || tWearable.iTeam != iTeam || tWearable.iUnusual != iUnusual
+			if (tWearable.uItemID != selectedID || tWearable.iDef != iDef || tWearable.iClass != iClass || tWearable.iTeam != iTeam || tWearable.iUnusual != iUnusual
 				|| tWearable.iPaintColor != iPaintColor || tWearable.iPaintColor2 != iPaintColor2 || tWearable.iStyle != iStyle)
 			{
 				RemoveWearable(pLocal, tWearable);
@@ -2711,7 +2965,7 @@ void CSkinChanger::UpdateWearables(CTFPlayer* pLocal)
 			}
 		}
 
-		auto* pView = GetWearableView(iClass, iSlot, iTeam, iDef, iUnusual, iPaintColor, iPaintColor2, iStyle);
+		auto* pView=bClientItem?GetWearableView(iClass,iSlot,iTeam,iDef,iUnusual,iPaintColor,iPaintColor2,iStyle):pLoadoutView;
 		if (!pView)
 			continue;
 
@@ -2727,6 +2981,7 @@ void CSkinChanger::UpdateWearables(CTFPlayer* pLocal)
 		}
 
 		tWearable.hEntity.Set(pCreated);
+        tWearable.uItemID=selectedID;
 		tWearable.iDef = iDef;
 		tWearable.iClass = iClass;
 		tWearable.iTeam = iTeam;
@@ -2737,9 +2992,9 @@ void CSkinChanger::UpdateWearables(CTFPlayer* pLocal)
 		bBodygroupsDirty = true;
 	}
 
-	HideReplacedWearables(pLocal, iClass);
 	if (bBodygroupsDirty)
 	{
+        pLocal->UpdateWearables();
 		pLocal->SetBodygroupsDirty();
 		RefreshInventoryHudModel();
 	}
@@ -2889,6 +3144,7 @@ const std::vector<ItemInfo_t>& CSkinChanger::GetItems()
 	s_vItems.clear();
 	s_vItems.reserve(iCount);
 
+	s_aSharedMelee.fill(false);
 	std::unordered_map<uint16_t, bool> mSeen = {};
 	std::unordered_map<std::string, uint16_t> mWeaponNames = { { "TF_WEAPON_BAT", 190 } };
 	std::vector<std::pair<uint16_t, std::string>> vWeaponBases;
@@ -2918,6 +3174,7 @@ const std::vector<ItemInfo_t>& CSkinChanger::GetItems()
 		tItem.iDef = iDef;
 		tItem.sName = sItemName.empty() ? PrettifyItemName(sName) : LocalizeItemName(sName);
 		tItem.sClass = ReadString(pDef->m_pszItemClass());
+        s_aSharedMelee[iDef] = tItem.sClass == "saxxy";
 		tItem.sImage = ReadString(pDef->m_pszImageInventory());
 		mItemNames.emplace(ReadString(pDef->m_pszName()), iDef);
 		if (tItem.sClass.starts_with("tf_weapon"))
@@ -2925,8 +3182,13 @@ const std::vector<ItemInfo_t>& CSkinChanger::GetItems()
 		if (auto* pRawDefinition = Field<KeyValues*>(pDef, 8); IsReadableMemory(pRawDefinition, sizeof(KeyValues)))
 		{
 			mDefinitions.emplace(iDef, pRawDefinition);
+            if(auto* classes=pRawDefinition->FindKey("used_by_classes"))
+                for(auto* entry=Field<KeyValues*>(classes,48);entry;entry=Field<KeyValues*>(entry,40))
+                    tItem.uClassMask|=InventoryClasses::Entry(entry->GetName(),classes->GetString(entry->GetName(),""));
 			tItem.bPaintable = pRawDefinition->GetBool("capabilities/paintable", false);
 			tItem.bHat = !strcmp(pRawDefinition->GetString("item_slot"), "head");
+            const std::string slot=pRawDefinition->GetString("item_slot");
+            tItem.bCosmetic=(slot=="head"||slot=="misc")&&(tItem.sClass=="tf_wearable"||tItem.sClass.starts_with("tf_wearable_"));
 			tItem.sImageOverlay = ReadString(pRawDefinition->GetString("image_inventory_overlay"));
 			tItem.sExtraModel = ReadString(pRawDefinition->GetString("extra_wearable"));
 			tItem.sExtraModelVM = ReadString(pRawDefinition->GetString("extra_wearable_vm"));
@@ -2972,6 +3234,14 @@ const std::vector<ItemInfo_t>& CSkinChanger::GetItems()
 
 	BuildWeaponTypes(mWeaponNames, vWeaponBases);
 	BuildCrateProfiles(mItemNames, mDefinitions);
+    // Reskins can inherit their base weapon's class restrictions. Schema data
+    // wins; never infer a class from localized display names.
+    std::unordered_map<uint16_t,uint32_t> classMasks;
+    for(const auto& item:s_vItems) if(item.uClassMask) classMasks.emplace(item.iDef,item.uClassMask);
+    for(auto& item:s_vItems)
+        if(!item.uClassMask&&item.sClass.starts_with("tf_weapon"))
+            if(auto found=classMasks.find(uint16_t(WeaponType(item.iDef)));found!=classMasks.end()) item.uClassMask=found->second;
+
 	for (auto& tItem : s_vItems)
 	{
 		const auto it = mToolTargets.find(tItem.iDef);
@@ -2981,6 +3251,7 @@ const std::vector<ItemInfo_t>& CSkinChanger::GetItems()
 		if (pTarget != s_vItems.end())
 		{
 			tItem.sToolTargetImage = pTarget->sImage;
+            if(!tItem.uClassMask) tItem.uClassMask=pTarget->uClassMask;
 			if (tItem.sName.find(pTarget->sName) == std::string::npos)
 				tItem.sName = pTarget->sName + " " + tItem.sName;
 		}
@@ -2993,6 +3264,8 @@ const std::vector<ItemInfo_t>& CSkinChanger::GetItems()
 	s_uItemCatalogueRevision++;
 	return s_vItems;
 }
+
+uint64_t CSkinChanger::CatalogueRevision() {return s_uItemCatalogueRevision;}
 
 bool CSkinChanger::IsCatalogueLoading()
 {
@@ -3082,8 +3355,131 @@ int CSkinChanger::GetItemUnusual(uint64_t uItemID)
 	return it != m_vBackpack.end() ? it->iUnusual : 0;
 }
 
+// Cosmetic only: consume genuine server deaths; never send or manufacture an event.
+void CSkinChanger::CacheGoldWeapons(CTFPlayer* local)
+{
+    s_goldWeapons = {};
+    if (!local || !Vars::Visuals::SkinChanger::Enabled.Value || G::Unload) return;
+    auto& weapons = local->m_hMyWeapons();
+    for (int i = 0; i < MAX_WEAPONS; ++i)
+    {
+        auto* weapon = weapons[i].Get();
+        if (!weapon) continue;
+        auto* view = reinterpret_cast<CEconItemView*>(uintptr_t(weapon) + kEconEntityAttrManager + kAttrContainerItem);
+        auto* attrs = reinterpret_cast<CAttributeList*>(uintptr_t(view) + kItemViewAttributeList);
+        s_goldWeapons[i] = {weapon->GetWeaponID(), GoldKillPolicy::Identify(
+            Field<uint16_t>(view, kViewDefIndex), std::bit_cast<uint32_t>(attrs->GetValue(kAttrAustralium, 0.f)) != 0)};
+    }
+}
+
+void CSkinChanger::GoldKillEvent(IGameEvent* event)
+{
+    if (!event || G::Unload || !I::GlobalVars) return;
+    const auto hash = FNV1A::Hash32(event->GetName());
+    if (hash == FNV1A::Hash32Const("game_newmap") || hash == FNV1A::Hash32Const("client_disconnect")
+        || hash == FNV1A::Hash32Const("teamplay_round_start"))
+    {
+        FlushGoldRagdolls(true);
+        s_goldDeaths.Clear();
+        s_goldWeapons = {};
+        return;
+    }
+    const int victim = I::EngineClient->GetPlayerForUserID(event->GetInt("userid"));
+    if (hash == FNV1A::Hash32Const("player_spawn"))
+    {
+        if (victim > 0 && victim < int(s_goldPending.size()))
+        {
+            auto& pending = s_goldPending[victim];
+            auto* ragdoll = pending.entity.Get();
+            auto* create = pending.create;
+            pending = {};
+            if (ragdoll && create) FinishRagdoll(ragdoll, create, false);
+        }
+        s_goldDeaths.Spawn(victim);
+        return;
+    }
+    if (hash != FNV1A::Hash32Const("player_death") || victim <= 0) return;
+    GoldKillPolicy::Kind kind = GoldKillPolicy::Kind::None;
+    const int attacker = I::EngineClient->GetPlayerForUserID(event->GetInt("attacker"));
+    // TF_DEATHFLAG_DEADRINGER = 32. Preserve fake deaths and all server custom damage.
+    if (Vars::Visuals::SkinChanger::Enabled.Value && !SDK::CleanScreenshot()
+        && attacker == I::EngineClient->GetLocalPlayer() && attacker != victim
+        && !(event->GetInt("death_flags") & 32))
+    {
+        const int weaponID = event->GetInt("weaponid", -1);
+        for (const auto& weapon : s_goldWeapons)
+            if (weapon.weaponID == weaponID) { kind = weapon.kind; break; }
+    }
+    s_goldDeaths.Record(victim, event->GetInt("userid"), I::GlobalVars->realtime,
+        kind != GoldKillPolicy::Kind::None);
+    if (const char* icon = GoldKillPolicy::Icon(kind))
+    {
+        event->SetString("weapon", icon);
+        event->SetString("weapon_logclassname", icon);
+    }
+}
+
+void CSkinChanger::CreateGoldRagdoll(CTFRagdoll* ragdoll, void(__fastcall* create)(void*))
+{
+    if (!ragdoll || !I::GlobalVars || G::Unload) { create(ragdoll); return; }
+    const float now = I::GlobalVars->realtime;
+    const int index = ragdoll->m_iPlayerIndex();
+    const int userID = RagdollUserID(ragdoll);
+    if (ragdoll->m_bFeignDeath() || SDK::CleanScreenshot() || !Vars::Visuals::SkinChanger::Enabled.Value)
+    {
+        FinishRagdoll(ragdoll, create, false);
+        return;
+    }
+    if (s_goldDeaths.Ready(index, userID, now))
+    {
+        FinishRagdoll(ragdoll, create, s_goldDeaths.Consume(index, userID, now));
+        return;
+    }
+    // Entity updates can precede player_death in the same packet. Delay initialization
+    // briefly, rather than rebuilding live physics or changing material after creation.
+    const bool possible = std::any_of(s_goldWeapons.begin(), s_goldWeapons.end(),
+        [](const GoldWeapon& w) { return w.kind != GoldKillPolicy::Kind::None; });
+    if (possible && index > 0 && index < int(s_goldPending.size()))
+    {
+        auto& pending = s_goldPending[index];
+        if (pending.create && pending.entity.Get() == ragdoll) return;
+        if (pending.create && pending.entity.Get()) FinishRagdoll(pending.entity.Get(), pending.create, false);
+        pending.entity.Set(ragdoll);
+        pending.create = create;
+        pending.queued = now;
+        return;
+    }
+    FinishRagdoll(ragdoll, create, false);
+}
+
+void CSkinChanger::FlushGoldRagdolls(bool force)
+{
+    for (auto& pending : s_goldPending)
+    {
+        if (!pending.create) continue;
+        auto* ragdoll = pending.entity.Get();
+        if (!ragdoll) { pending = {}; continue; }
+        const float now = I::GlobalVars ? I::GlobalVars->realtime : pending.queued + 1.f;
+        const int index = ragdoll->m_iPlayerIndex();
+        const int userID = RagdollUserID(ragdoll);
+        const bool enabled = Vars::Visuals::SkinChanger::Enabled.Value && !SDK::CleanScreenshot() && !G::Unload;
+        if (force || !enabled || s_goldDeaths.Ready(index, userID, now)
+            || now < pending.queued || now - pending.queued >= 0.1f)
+        {
+            const bool gold = !force && enabled && !ragdoll->m_bFeignDeath()
+                && s_goldDeaths.Consume(index, userID, now);
+            auto* create = pending.create;
+            pending = {};
+            FinishRagdoll(ragdoll, create, gold);
+        }
+    }
+}
+
 void CSkinChanger::OnLevelShutdown()
 {
+    FlushGoldRagdolls(true);
+    s_goldDeaths.Clear();
+    s_goldWeapons = {};
 	ResetInventoryHudModel();
 	RestoreWeaponVisuals();
 	ResetWearables(m_hWearableOwner.Get());
@@ -3091,6 +3487,9 @@ void CSkinChanger::OnLevelShutdown()
 
 void CSkinChanger::Unload()
 {
+    FlushGoldRagdolls(true);
+    s_goldDeaths.Clear();
+    s_goldWeapons = {};
 	RestoreWeaponVisuals();
 	ResetWearables(m_hWearableOwner.Get());
 	ClearClientItems();
@@ -3150,14 +3549,20 @@ int CSkinChanger::GetInventoryCount(uint16_t iDef)
 
 void CSkinChanger::ScheduleRefresh() {}
 int CSkinChanger::OriginalDef(CBaseEntity*, int, int iCurrent) const { return iCurrent; }
+void CSkinChanger::GoldKillEvent(IGameEvent*) {}
+void CSkinChanger::CreateGoldRagdoll(CTFRagdoll* ragdoll, void(__fastcall* create)(void*)) { create(ragdoll); }
+void CSkinChanger::FlushGoldRagdolls(bool) {}
+void CSkinChanger::CacheGoldWeapons(CTFPlayer*) {}
 void CSkinChanger::RunFrame() {}
 void CSkinChanger::Apply() {}
+void CSkinChanger::PrepareWeaponDeploy(CTFWeaponBase*) {}
 void CSkinChanger::Service() {}
 void CSkinChanger::CacheMenuInfo(CTFWeaponBase*) {}
 void CSkinChanger::OnLevelShutdown() {}
 void CSkinChanger::Unload() {}
 const std::vector<ItemInfo_t>& CSkinChanger::GetItems() { static std::vector<ItemInfo_t> vItems; return vItems; }
 bool CSkinChanger::IsCatalogueLoading() { return false; }
+uint64_t CSkinChanger::CatalogueRevision() {return 0;}
 void CSkinChanger::RequestFullUpdate() {}
 void CSkinChanger::AddToBackpack(uint16_t, int, int) {}
 void CSkinChanger::SetBackpackStyle(uint32_t, int) {}
@@ -3193,13 +3598,13 @@ void CSkinChanger::UpdateWeaponVisuals(CTFPlayer*) {}
 void CSkinChanger::RestoreWeaponVisuals() {}
 void CSkinChanger::ResetWearables(CTFPlayer*) {}
 void CSkinChanger::RestoreHiddenWearables() {}
-void CSkinChanger::HideReplacedWearables(CTFPlayer*, int) {}
+bool CSkinChanger::HideReplacedWearables(CTFPlayer*, int) { return false; }
 void CSkinChanger::RemoveWearable(CTFPlayer*, Wearable_t&) {}
 void CSkinChanger::ClearWearables() {}
 CEconItemView* CSkinChanger::GetWearableView(int, int, int, int, int, int, int, int) { return nullptr; }
 CEconWearable* CSkinChanger::CreateWearable(CTFPlayer*, CEconItemView*, int, int) { return nullptr; }
 bool CSkinChanger::AppendWearable(CTFPlayer*, CEconWearable*) { return false; }
-uint64_t CSkinChanger::FindOwnedWeapon(uint64_t) { return 0; }
+uint64_t CSkinChanger::FindOwnedWeapon(uint64_t, int, int) { return 0; }
 bool CSkinChanger::ApplyLocalPaint(CTFPlayerInventory*, const PendingCrate_t&) { return false; }
 bool CSkinChanger::IsReplacedWearableItem(uint64_t) { return false; }
 

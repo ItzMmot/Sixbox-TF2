@@ -262,7 +262,7 @@ def build(args, vc, sdk, sdk_version, ft, backend, boost_source, sources, ft_sou
              '/I' + win(backend), '/I' + win(ROOT / 'SixBox/include/ImGui')]
     folders = [ROOT / 'SixBox/src', ROOT / 'SixBox/include', ft, backend]
     extras = [Path(__file__).resolve(), ROOT / 'build.sh', project, ft / 'CMakeLists.txt', *sources,
-              *ROOT.joinpath('SixBox').glob('*.props'), ROOT / '.github/scripts/build-aura-shaders.py', ROOT / 'scripts/inject-sixbox-offline.bat']
+              *ROOT.joinpath('SixBox').glob('*.props'), ROOT / '.github/scripts/build-aura-shaders.py', ROOT / '.github/scripts/build-karaoke-shaders.py', ROOT / 'scripts/inject-sixbox-offline.bat']
     config = {'flags': flags, 'vc': str(vc), 'sdk': str(sdk), 'sdk_version': sdk_version,
               'cl_sha256': digest(vc / 'bin/Hostx64/x64/cl.exe'), 'boost': str(boost_source.resolve())}
     fingerprint, inputs = snapshot(ROOT, folders, extras, config)
@@ -274,6 +274,7 @@ def build(args, vc, sdk, sdk_version, ft, backend, boost_source, sources, ft_sou
     output = ROOT / 'output/x64/ReleaseAVX2/SixBoxx64ReleaseFreetypeAVX2.dll'
     reusable = not args.clean and state.get('fingerprint') == fingerprint and output.is_file() and state.get('sha256') == digest(output)
     subprocess.run([sys.executable, str(ROOT / '.github/scripts/build-aura-shaders.py'), '--check'], cwd=ROOT, check=True)
+    subprocess.run([sys.executable, str(ROOT / '.github/scripts/build-karaoke-shaders.py'), '--check'], cwd=ROOT, check=True)
     if reusable:
         pe_imports(output.read_bytes())
         print('Inputs unchanged; reusing the verified DLL.', flush=True)
@@ -346,6 +347,8 @@ def build(args, vc, sdk, sdk_version, ft, backend, boost_source, sources, ft_sou
         install_launchers(drive, out / 'backups')
         receipt['fingerprint'] = fingerprint
         (out / 'installed.json').write_text(json.dumps(receipt, indent=2))
+        if sys.platform == 'linux':
+            subprocess.run([sys.executable, str(ROOT / 'scripts/karaoke/install.py'), '--update-only', '--quiet', '--prefix', str(drive.parent)], check=True)
     print(f'Done. DLL: {output}\nSHA256: {digest(output)}', flush=True)
 
 
