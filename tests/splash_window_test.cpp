@@ -26,11 +26,12 @@ int main()
     edge.first.x=edge.last.x=16384;auto far=Capsule(edge,{0,0,0},{1,0,0},Skin,20000);
     assert(far.valid&&std::abs(far.high-far.low-2*Skin)<1e-6);edge.first.x=edge.last.x=0;
     auto hull=Hull(edge,{-10,0,0},{1,0,0},{2,1,3},100,0);
-    assert(hull.valid&&hull.low==8&&hull.high==12);
+    assert(hull.valid&&std::abs(hull.low-8)<1e-10&&std::abs(hull.high-12)<1e-10);
     auto endpoint=Hull(edge,{-10,6,0},{1,0,0},{2,1,3},100,0);assert(endpoint.valid);
     assert(!Hull(edge,{-10,6.1f,0},{1,0,0},{2,1,3},100,0).valid);
-    auto inside=Hull(edge,{0,0,0},{0,1,0},{1,1,1},100,0);assert(inside.valid&&inside.low==0&&inside.high==6);
-    auto oblique=Hull(edge,{-10,0,-10},{1,0,1},{2,1,3},100,0);assert(oblique.valid&&oblique.low==8&&oblique.high==12);
+    // Polygon clipping may fuse multiply/add; compare geometry within rounding error.
+    auto inside=Hull(edge,{0,0,0},{0,1,0},{1,1,1},100,0);assert(inside.valid&&inside.low==0&&std::abs(inside.high-6)<1e-10);
+    auto oblique=Hull(edge,{-10,0,-10},{1,0,1},{2,1,3},100,0);assert(oblique.valid&&std::abs(oblique.low-8)<1e-10&&std::abs(oblique.high-12)<1e-10);
     assert(!Hull(edge,{},{},{1,1,1},100).valid);
     assert(!Hull(edge,{},{1,0,0},{-1,1,1},100).valid);
     Edge point{{0,0,0},{0,0,0},{1,0,0},{0,0,1}};assert(Capsule(point,{-10,0,0},{1,0,0},Skin,100).valid);
