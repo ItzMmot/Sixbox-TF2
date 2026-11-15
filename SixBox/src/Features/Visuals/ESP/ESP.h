@@ -12,6 +12,7 @@ struct Text_t
 	Color_t m_tColor = {};
 	Color_t m_tOutline = {};
 	byte m_ucBackgroundAlpha = -1;
+	bool m_bName = false;
 };
 
 struct Bar_t
@@ -125,6 +126,7 @@ private:
 	std::unordered_map<CBaseEntity*, ESPMotion_t> m_mMotion = {};
 
 public:
+	void Shutdown();
 	void Store(CTFPlayer* pLocal);
 	void CacheDrawInfo(CTFPlayer* pLocal);
 	void Draw(ImDrawList* pDrawList);

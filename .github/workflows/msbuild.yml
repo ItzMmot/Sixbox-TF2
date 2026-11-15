@@ -30,6 +30,26 @@ jobs:
             "${RUNNER_TEMP}/${test}_test"
           done
 
+  overlay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install offscreen Qt dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libopengl0
+          python -m pip install -r scripts/overlay/requirements.txt
+      - name: Check external renderer and source distribution
+        run: |
+          python tests/overlay/test_overlay.py
+          python tests/overlay/test_model_stencil.py
+          python tests/overlay/test_distribution.py
+          g++ -std=c++20 -O2 tests/overlay/model_policy_test.cpp -o /tmp/model-policy-test
+          /tmp/model-policy-test
+
   msbuild:
     runs-on: windows-latest
 

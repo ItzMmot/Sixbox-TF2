@@ -1,3 +1,6 @@
+#ifndef TEXTMODE
+#include "../Overlay/Linux/status.hpp"
+#endif
 #include "Menu.h"
 
 #ifndef TEXTMODE
@@ -164,6 +167,9 @@ void CMenu::MenuESP()
 
 		ManageVars(); // Rebuild owned labels after a same-frame add.
 		FDropdown(Vars::ESP::ActiveGroups, FDropdownEnum::Multi);
+#ifndef TEXTMODE
+#include "../Overlay/Linux/menu.inc"
+#endif
 
 		const int iCount = int(F::Groups.m_vGroups.size());
 		if (iCount)
@@ -465,29 +471,50 @@ void CMenu::MenuESP()
         auto& effect=tGroup.m_tAura;
         FToggle("Enabled## Aura", &effect.Enabled);
         FTooltip("Continuous model coating. Up to 8 active Aura groups; viewmodel groups have priority.");
+        if(FPopupButton("Customize Aura"))
+        {
+            static int section=0;
+            FDropdown("Settings## Aura",&section,{"General","Shape","Colors & glow","Animation","Wind & movement","Rendering"});
+            auto category=[](std::string_view name)
+            {
+                if(name=="Thickness"||name=="Height"||name=="Width"||name=="Fill"||name=="Outline"||name=="Softness")return 1;
+                if(name=="Glow")return 2;
+                if(name=="Velocity"||name=="Turbulence"||name=="NoiseScale"||name=="Animation"||name=="Flicker"||name=="Pulse"||name=="Spin")return 3;
+                if(name=="Wind"||name=="WindSpeed"||name=="WindDirection"||name=="Motion"||name=="CameraSway"||name=="Inertia")return 4;
+                if(name=="Distance")return 5;
+                return 0;
+            };
+            PushTransparent(!effect.Enabled);
+#define AURA_SLIDER(n,l,d,lo,hi,step) if(category(#n)==section) FSlider(l "## Aura", &effect.n,lo,hi,step,"%g",FSliderEnum::Clamp | FSliderEnum::Precision);
+            AURA_FLOAT_SETTINGS(AURA_SLIDER)
+#undef AURA_SLIDER
+            if(section==1)FDropdown("Coverage## Aura",&effect.Coverage,{"Full","Outline","Fill"});
+            if(section==2)
+            {
+                FToggle("Preset colors## Aura",&effect.PresetColors);
+                FToggle("Use group color## Aura",&effect.GroupColor);
+                PushTransparent(Transparent||effect.PresetColors||effect.GroupColor);
+                FColorPicker("Core color## Aura",&effect.Core,FColorPickerEnum::Full);
+                FColorPicker("Edge color## Aura",&effect.Edge,FColorPickerEnum::Full);
+                PopTransparent();
+            }
+            if(section==5)
+            {
+                FDropdown("Quality## Aura",&effect.Quality,{"Low","Medium","High"});
+                FToggle("Additive blend## Aura",&effect.Additive);
+                bool throughWalls=!effect.VisibleOnly;
+                if(FToggle("Render through walls## Aura",&throughWalls))effect.VisibleOnly=!throughWalls;
+                FTooltip("Disabled: use scene depth or source visibility testing.");
+            }
+            PopTransparent();
+            EndPopup();
+        }
+        FTooltip("Customize Aura: shape, colors, animation, wind and rendering.");
         PushTransparent(!effect.Enabled);
         static std::vector<const char*> modes(std::begin(Aura::ModeNames),std::end(Aura::ModeNames));
-        static std::vector<const char*> quality={"Low", "Medium", "High"};
-        if (FDropdown("Mode## Aura", &effect.Mode, modes))
-            effect.Additive=Aura::DefaultAdditive(effect.Mode);
-#define AURA_SLIDER(n,l,d,lo,hi,step) FSlider(l "## Aura", &effect.n,lo,hi,step,"%g",FSliderEnum::Clamp | FSliderEnum::Precision);
-        AURA_FLOAT_SETTINGS(AURA_SLIDER)
-#undef AURA_SLIDER
-        FDropdown("Quality## Aura", &effect.Quality, quality);
-        FDropdown("Coverage## Aura", &effect.Coverage, {"Full", "Outline", "Fill"});
-        FToggle("Additive blend## Aura", &effect.Additive);
-        bool throughWalls=!effect.VisibleOnly;
-        if (FToggle("Render through walls## Aura", &throughWalls))
-            effect.VisibleOnly=!throughWalls;
-        FTooltip("Render the Aura coating through walls. Disabled: use scene depth or source visibility testing.");
-        FToggle("Preset colors## Aura", &effect.PresetColors);
-        FToggle("Use group color## Aura", &effect.GroupColor);
-        PushTransparent(Transparent || effect.PresetColors || effect.GroupColor);
-        FColorPicker("Core color## Aura", &effect.Core, FColorPickerEnum::Full);
-        FColorPicker("Edge color## Aura", &effect.Edge, FColorPickerEnum::Full);
+        if(FDropdown("Mode## Aura",&effect.Mode,modes))effect.Additive=Aura::DefaultAdditive(effect.Mode);
         PopTransparent();
-        PopTransparent();
-    } EndSection();
+    }EndSection();
 
 	EndTable();
 }

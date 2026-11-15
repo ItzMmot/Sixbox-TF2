@@ -1,3 +1,4 @@
+#include "../Features/Visuals/ESP/ESP.h"
 #include "Core.h"
 
 #include "../Features/Players/SteamProfileCache.h"
@@ -261,6 +262,7 @@ void CCore::Unload()
 	m_bFailed2 = !U::Hooks.Unload() || m_bFailed2;
 	F::SkinChanger.Unload();
     F::Karaoke.Shutdown();
+    F::ESP.Shutdown();
 	F::CaptureOverlay.Shutdown();
 #endif
 	U::BytePatches.Unload();

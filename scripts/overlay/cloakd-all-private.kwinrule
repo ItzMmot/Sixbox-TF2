@@ -1,0 +1,12 @@
+[cloakd-all-private]
+Description=Cloakd - exclude overlay windows from capture
+wmclass=io.github.cloakd.overlay
+wmclassmatch=1
+wmclasscomplete=false
+titlematch=0
+excludefromcapture=true
+excludefromcapturerule=2
+layer=overlay
+layerrule=2
+above=true
+aboverule=2

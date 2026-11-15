@@ -1,4 +1,20 @@
-# Local Linux / Proton build
+# Building SixBox
+
+## Windows x64
+
+Install Visual Studio 2022 C++ desktop tools, a Windows SDK and NuGet CLI. From
+a developer command prompt run:
+
+```bat
+nuget restore SixBox.sln
+msbuild SixBox.sln /m:2 /p:Configuration=ReleaseAVX2 /p:Platform=x64
+```
+
+The FreeType AVX2 release recipe is `.github/scripts/build-release-freetype.ps1`;
+`.github/workflows/release-freetype-avx2.yml` pins and downloads its dependencies.
+Ordinary MSBuild uses the bundled font backend unless FreeType is explicitly set.
+
+## Linux / Proton
 
 Run `./build.sh` from the repository root. The command stays the same after
 source changes. Close TF2 first: the default action builds **Release AVX2 with
@@ -10,9 +26,11 @@ by its absolute path from another directory. Its implementation is tracked in
 
 ## Prepared toolchain
 
-This workspace already has Wine, MSVC, the Windows SDK, Boost headers, FreeType
-2.14.3 sources and the ImGui 1.92.7 FreeType backend. The script uses those local
-dependencies; it does not install a toolchain on a new machine.
+Install Wine, MSVC x64 tools and the Windows SDK, Boost headers, FreeType
+2.14.3 sources and the ImGui 1.92.7 FreeType backend before building. The script
+validates these dependencies; it does not download proprietary build tools.
+A clean checkout contains the complete client source and overlay integration.
+Use the variables below for toolchains outside the default locations.
 
 `./build.sh --check` validates prerequisites without compiling or installing.
 The default search locations are `.builds/tools/msvc`, `/usr/include/boost`,
@@ -71,3 +89,11 @@ are retained, and an existing `6box/` directory is never overwritten. If the
 copy fails, the client uses the old directory for that run. Old default titles
 and tags are normalized to SixBox / [6box]; custom labels are preserved. Loot
 cache readers accept both the former and new file signatures.
+
+## Optional Linux helpers
+
+[Overlay setup](overlay.md) and [Karaoke setup](karaoke.md) describe the platform
+requirements and installation. Releases include `SixBox-Linux-Helpers.zip` with
+helper sources, vendor assets, licenses and setup docs. These helpers are
+optional for ordinary DLL use; Overlay render requires its Linux helper and
+KWin capture-exclusion support. Native Windows does not support that renderer.

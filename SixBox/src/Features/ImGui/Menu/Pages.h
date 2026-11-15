@@ -15,7 +15,7 @@ enum EMenuPage
 
 inline const std::vector<NavPage_t> vMenuPages = {
 	{ "Aimbot", ICON_MD_GPS_FIXED, { "General", "Weapons", "Support", "Draw" } },
-	{ "Visuals", ICON_MD_VISIBILITY, { "ESP", "View", "World", "Menu" } },
+	{ "Visuals", ICON_MD_VISIBILITY, { "ESP", "View", "World", "Menu", "Jump coach" } },
 	{ "HvH", ICON_MD_BOLT, { "Ticks", "Angles" } },
 	{ "Misc", ICON_MD_TUNE, { "Main", "Automation", "Bots", "Queueing" } },
 	{ "Anticheat", ICON_MD_GPP_MAYBE, { "Cheaters", "Detection" } },

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloakd-render"
+version = "0.3.0"
+description = "Embeddable Qt Quick rendering engine with Python and C++ graph backends"
+requires-python = ">=3.10"
+dependencies = ["PySide6>=6.7,<7"]
+
+[tool.setuptools.packages.find]
+include = ["cloakd_render*"]
+
+[tool.setuptools.package-data]
+cloakd_render = ["qml/*.qml", "qml/Cloakd/Native/*", "shaders/*.frag", "shaders/*.qsb"]

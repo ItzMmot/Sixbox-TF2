@@ -41,6 +41,7 @@ private:
 		CBaseEntity* m_pEntity;
 		Color_t m_tColor;
 		int m_iFlags = 0;
+		bool m_bExternal = false;
 	};
 	std::unordered_map<Glow_t, std::vector<GlowInfo_t>, GlowHasher_t> m_mEntities = {};
 

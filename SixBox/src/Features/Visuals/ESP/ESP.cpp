@@ -1,4 +1,7 @@
 #include "ESP.h"
+#ifndef TEXTMODE
+#include "../../ImGui/Overlay/Linux/overlay.hpp"
+#endif
 
 #include "../Groups/Groups.h"
 #include "../../Players/PlayerUtils.h"
@@ -66,7 +69,7 @@ static inline void StorePlayer(CTFPlayer* pPlayer, CTFPlayer* pLocal, Group_t* p
 	if (pResource)
 	{
 		if (pGroup->m_tESP.Draw & ESPEnum::Name)
-			tCache.m_vText.emplace_back(ALIGN_TOP, F::PlayerUtils.GetPlayerName(iIndex, pResource->GetName(iIndex)), Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, (pGroup->m_tESP.Draw & ESPEnum::NameBackground) ? pGroup->m_tESP.BackgroundOpacity : 0);
+			tCache.m_vText.emplace_back(ALIGN_TOP, F::PlayerUtils.GetPlayerName(iIndex, pResource->GetName(iIndex)), Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, (pGroup->m_tESP.Draw & ESPEnum::NameBackground) ? pGroup->m_tESP.BackgroundOpacity : 0, true);
 
 		if (pGroup->m_tESP.Draw & (ESPEnum::Labels | ESPEnum::Priority) && !pResource->IsFakePlayer(iIndex))
 		{
@@ -503,7 +506,7 @@ static inline void StoreBuilding(CBaseObject* pBuilding, CTFPlayer* pLocal, Grou
 		case ETFClassID::CObjectDispenser: sName = "Dispenser"; break;
 		case ETFClassID::CObjectTeleporter: sName = pBuilding->m_iObjectMode() ? "Teleporter Exit" : "Teleporter Entrance";
 		}
-		tCache.m_vText.emplace_back(ALIGN_TOP, sName, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, (pGroup->m_tESP.Draw & ESPEnum::NameBackground) ? pGroup->m_tESP.BackgroundOpacity : 0);
+		tCache.m_vText.emplace_back(ALIGN_TOP, sName, Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, (pGroup->m_tESP.Draw & ESPEnum::NameBackground) ? pGroup->m_tESP.BackgroundOpacity : 0, true);
 	}
 
 	float flHealth = pBuilding->m_iHealth(), flMaxHealth = pBuilding->m_iMaxHealth();
@@ -637,7 +640,7 @@ static inline void StoreProjectile(CBaseEntity* pProjectile, CTFPlayer* pLocal, 
 	}
 
 	if (pGroup->m_tESP.Draw & ESPEnum::Name)
-		tCache.m_vText.emplace_back(ALIGN_TOP, GetProjectileName(pProjectile), Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, (pGroup->m_tESP.Draw & ESPEnum::NameBackground) ? pGroup->m_tESP.BackgroundOpacity : 0);
+		tCache.m_vText.emplace_back(ALIGN_TOP, GetProjectileName(pProjectile), Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, (pGroup->m_tESP.Draw & ESPEnum::NameBackground) ? pGroup->m_tESP.BackgroundOpacity : 0, true);
 
 	if (pGroup->m_tESP.Draw & ESPEnum::Owner && pOwner)
 	{
@@ -743,7 +746,7 @@ static inline void StoreObjective(CBaseEntity* pObjective, CTFPlayer* pLocal, Gr
 		auto pIntel = pObjective->As<CCaptureFlag>();
 
 		if (pGroup->m_tESP.Draw & ESPEnum::Name)
-			tCache.m_vText.emplace_back(ALIGN_TOP, "Intel", Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, (pGroup->m_tESP.Draw & ESPEnum::NameBackground) ? pGroup->m_tESP.BackgroundOpacity : 0);
+			tCache.m_vText.emplace_back(ALIGN_TOP, "Intel", Vars::Menu::Theme::Active.Value, Vars::Menu::Theme::Background.Value, (pGroup->m_tESP.Draw & ESPEnum::NameBackground) ? pGroup->m_tESP.BackgroundOpacity : 0, true);
 
 		if (pGroup->m_tESP.Draw & ESPEnum::Flags)
 		{
@@ -838,7 +841,7 @@ static inline void StoreMisc(CBaseEntity* pEntity, CTFPlayer* pLocal, Group_t* p
 		case ETFClassID::CHalloweenGiftPickup: sName = "Gargoyle"; break;
 		}
 
-		tCache.m_vText.emplace_back(ALIGN_TOP, sName, pGroup->m_tColor, Vars::Menu::Theme::Background.Value, (pGroup->m_tESP.Draw & ESPEnum::NameBackground) ? pGroup->m_tESP.BackgroundOpacity : 0);
+		tCache.m_vText.emplace_back(ALIGN_TOP, sName, pGroup->m_tColor, Vars::Menu::Theme::Background.Value, (pGroup->m_tESP.Draw & ESPEnum::NameBackground) ? pGroup->m_tESP.BackgroundOpacity : 0, true);
 	}
 }
 
@@ -1983,6 +1986,13 @@ static IDirect3DTexture9* GetIconTexture(const std::string& sTexture)
 }
 #endif
 
+void CESP::Shutdown()
+{
+#ifndef TEXTMODE
+    LocalExtension::Bridge().Stop();
+#endif
+}
+
 void CESP::Draw(ImDrawList* pDrawList)
 {
 	if (!pDrawList)
@@ -1991,10 +2001,16 @@ void CESP::Draw(ImDrawList* pDrawList)
 	const ESPDrawCache_t tCache = m_tDrawCache.Get();
 	m_flAnimTime += std::clamp(ImGui::GetIO().DeltaTime, 0.f, 0.1f);
 
+#ifndef TEXTMODE
+    LocalExtension::Bridge().Begin();
+#endif
 	DrawEntities(pDrawList, tCache.m_vWorld, false);
 	DrawEntities(pDrawList, tCache.m_vBuildings, false);
 	DrawEntities(pDrawList, tCache.m_vPlayers, true);
 
+#ifndef TEXTMODE
+    LocalExtension::Bridge().End();
+#endif
 	CleanupAnims();
 }
 
@@ -2038,7 +2054,12 @@ void CESP::DrawEntities(ImDrawList* pDrawList, const std::vector<ESPDrawEntity_t
 			}
 		}
 
-		if (tEntity.m_bBox)
+		bool bDrawBox = tEntity.m_bBox;
+#ifndef TEXTMODE
+        if (bDrawBox && LocalExtension::Bridge().Box(x, y, w, h, tEntity.m_tColor, flAlpha, tEntity.m_iBoxStyle))
+            bDrawBox = false;
+#endif
+		if (bDrawBox)
 		{
 			switch (tEntity.m_iBoxStyle)
 			{
@@ -2098,11 +2119,18 @@ void CESP::DrawEntities(ImDrawList* pDrawList, const std::vector<ESPDrawEntity_t
 			}
 		}
 
-		for (const auto& [iMode, sText, tColor, tOutline, ucBackgroundAlpha] : tEntity.m_vText)
+		for (const auto& [iMode, sText, tColor, tOutline, ucBackgroundAlpha, bName] : tEntity.m_vText)
 		{
 			switch (iMode)
 			{
 			case ALIGN_TOP:
+#ifndef TEXTMODE
+                if (bName && LocalExtension::Bridge().Name(m, t - tOffset, sText, tColor, tOutline, ucBackgroundAlpha, flAlpha, ImGui::GetFontSize()))
+                {
+                    tOffset += nTall;
+                    break;
+                }
+#endif
 				if (ucBackgroundAlpha)
 				{
 					Color_t tBackground = tOutline;

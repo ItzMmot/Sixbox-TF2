@@ -151,3 +151,10 @@ They do not validate TF2's live model-capture path, appearance or performance.
 The render-pass flags and MSAA depth constraint follow Valve’s public
 [studio-render interface](https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/public/istudiorender.h)
 and [shader API](https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/public/shaderapi/ishaderapi.h).
+
+## Compact controls
+
+The ESP Aura card shows Enabled and Mode. Use the settings icon beside Enabled
+to open its editor: General, Shape, Colors & glow, Animation, Wind & movement,
+and Rendering. Only the selected section is displayed; all existing controls
+and saved settings are retained. The wall-occlusion toggle is under Rendering.

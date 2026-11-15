@@ -1,6 +1,6 @@
 # Jump Coach
 
-Enable **Misc → Main → Movement → Jump coach**. It is disabled by default and
+Enable **Visuals → Jump coach**. It is disabled by default and
 works for ordinary airborne movement across classes; Soldier only is optional.
 All settings participate in the existing visual/main config and bind system.
 
@@ -148,3 +148,5 @@ world-anchored; marker positions remain on the current collision plane. Actual
 and ideal landing markers keep separate histories. No new Jump Coach setting
 was added. Regression cases cover alternating strafe phases, marker attenuation,
 slider zero, floor changes and a moving owner with a stationary landing.
+
+Menu placement does not change saved setting keys; existing configurations retain their values.

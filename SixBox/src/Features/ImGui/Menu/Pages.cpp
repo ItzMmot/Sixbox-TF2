@@ -852,6 +852,44 @@ static void KaraokeSettings()
     }EndSection();
 }
 
+static void VisualsJumpCoach()
+{
+    if(!PageTable("VisualsJumpCoach",2))return;
+    using namespace Vars::Misc::Movement::JumpCoach;
+    TableNextColumn();
+    if(Section("Jump coach"))
+    {
+        FToggle(Enabled);PushTransparent(!Enabled.Value);
+        FToggle(SoldierOnly);FToggle(OnlyAir);FSlider(PredictionTime);FSlider(TraceBudget);
+        FNote("Visual coaching only. Movement and attacks remain under your control.");
+        PopTransparent();
+    }EndSection();
+    if(Section("Prediction display"))
+    {
+        PushTransparent(!Enabled.Value);
+        FToggle(DrawPath);FToggle(DrawIdeal);FSlider(PathSmoothing);
+        FToggle(DrawLanding);FToggle(ThroughWalls);FColorPicker(PathColor);
+        FNote("Solid: current input. Dashed: ideal A/D strafe without W/S. Rockets affect the estimate after their actual boost is observed.");
+        PopTransparent();
+    }EndSection();
+    TableNextColumn();
+    if(Section("Coaching"))
+    {
+        PushTransparent(!Enabled.Value);
+        FToggle(StrafeHints);FSlider(MinimumSpeed);FToggle(RocketTiming);
+        PushTransparent(!RocketTiming.Value);FSlider(ShotLead);PopTransparent();
+        PopTransparent();
+    }EndSection();
+    if(Section("Jump coach HUD"))
+    {
+        PushTransparent(!Enabled.Value);
+        FToggle(DrawHUD);PushTransparent(!DrawHUD.Value);
+        FSlider(HUDX);FSlider(HUDY);FSlider(HUDScale);
+        PopTransparent();PopTransparent();
+    }EndSection();
+    EndTable();
+}
+
 static void VisualsWorld()
 {
 	if (!PageTable("VisualsWorld", 2))
@@ -1253,33 +1291,6 @@ static void MiscMain()
 		}
 		PopTransparent();
 
-        Subheader("Jump coach");
-        FToggle(JumpCoach::Enabled);
-        PushTransparent(!JumpCoach::Enabled.Value);
-        {
-            FToggle(JumpCoach::SoldierOnly);
-            FToggle(JumpCoach::OnlyAir);
-            FSlider(JumpCoach::PredictionTime);
-            FSlider(JumpCoach::TraceBudget);
-            FToggle(JumpCoach::DrawPath);
-            FToggle(JumpCoach::DrawIdeal);
-            FSlider(JumpCoach::PathSmoothing);
-            FToggle(JumpCoach::DrawLanding);
-            FToggle(JumpCoach::ThroughWalls);
-            FToggle(JumpCoach::StrafeHints);
-            FSlider(JumpCoach::MinimumSpeed);
-            FToggle(JumpCoach::RocketTiming);
-            PushTransparent(!JumpCoach::RocketTiming.Value);
-            FSlider(JumpCoach::ShotLead);
-            PopTransparent();
-            FToggle(JumpCoach::DrawHUD);
-            PushTransparent(!JumpCoach::DrawHUD.Value);
-            FSlider(JumpCoach::HUDX);FSlider(JumpCoach::HUDY);FSlider(JumpCoach::HUDScale);
-            PopTransparent();
-            FColorPicker(JumpCoach::PathColor);
-            FNote("Advice only. Solid path holds current input and yaw; dashed path assumes optimal A/D without W/S. Rockets enter the flight estimate only after their actual boost is observed.");
-        }
-        PopTransparent();
 
 		Subheader("Control");
 		FToggle(FastStop);
@@ -1872,6 +1883,7 @@ bool Pages::Draw(int iPage, int iSub)
 		case 1: VisualsView(); return true;
 		case 2: VisualsWorld(); return true;
 		case 3: VisualsMenu(); return true;
+        case 4: VisualsJumpCoach(); return true;
 		}
 		break;
 	case MenuPageHvH:

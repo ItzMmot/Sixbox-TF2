@@ -349,6 +349,9 @@ def build(args, vc, sdk, sdk_version, ft, backend, boost_source, sources, ft_sou
         (out / 'installed.json').write_text(json.dumps(receipt, indent=2))
         if sys.platform == 'linux':
             subprocess.run([sys.executable, str(ROOT / 'scripts/karaoke/install.py'), '--update-only', '--quiet', '--prefix', str(drive.parent)], check=True)
+            helper = subprocess.run([sys.executable, str(ROOT / 'scripts/overlay/install.py'), '--update-only', '--quiet', '--prefix', str(drive.parent)])
+            if helper.returncode:
+                print('DLL installed; optional overlay helper update failed. Run scripts/overlay/install.py --check for details.', flush=True)
     print(f'Done. DLL: {output}\nSHA256: {digest(output)}', flush=True)
 
 

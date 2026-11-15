@@ -144,7 +144,7 @@ jobs:
           Commit: $env:GITHUB_SHA
           Build: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
 
-          Download SixBoxx64ReleaseFreetypeAVX2.dll below. Third-party licenses and SHA256 checksums are included.
+          Download SixBoxx64ReleaseFreetypeAVX2.dll below. Linux/Proton optional features use SixBox-Linux-Helpers.zip; see its docs/overlay.md and docs/karaoke.md. Third-party licenses and SHA256 checksums are included.
           "@ | Set-Content $notes -Encoding utf8
           $assets = @(Get-ChildItem output/release -File | ForEach-Object FullName)
           gh release view nightly *> $null

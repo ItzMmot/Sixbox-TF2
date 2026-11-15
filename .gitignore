@@ -405,3 +405,13 @@ Desktop.ini
 
 # Local UI window layout
 /imgui.ini
+
+# Local references, personal backups and generated overlay files
+/.private/
+/[Cc][Ll][Oo][Aa][Kk][Dd]*/
+/scripts/overlay/vendor/build/
+/scripts/overlay/vendor/*.egg-info/
+/scripts/overlay/vendor/cloakd_render/qml/Cloakd/Native/
+/tests/overlay/preview*.png
+*.so
+*.so.*

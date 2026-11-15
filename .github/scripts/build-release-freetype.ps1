@@ -60,7 +60,13 @@ Copy-Item "$deps/imgui/LICENSE.txt" "$licenses/ImGui-LICENSE.txt"
 Copy-Item "$deps/freetype/LICENSE.TXT" "$licenses/FreeType-LICENSE.txt"
 Copy-Item "$deps/freetype/docs/FTL.TXT" "$licenses/FreeType-FTL.txt"
 Copy-Item "$deps/freetype/docs/GPLv2.TXT" "$licenses/FreeType-GPLv2.txt"
+Copy-Item "SixBox/include/ThirdParty/Earcut/LICENSE" "$licenses/Earcut-LICENSE.txt"
+Copy-Item "SixBox/include/ThirdParty/KaraokeGlass/LICENSE-blur.txt" "$licenses/KaraokeGlass-blur-LICENSE.txt"
+Copy-Item "SixBox/include/ThirdParty/KaraokeGlass/LICENSE-liquid.txt" "$licenses/KaraokeGlass-liquid-LICENSE.txt"
+Copy-Item "scripts/overlay/vendor/LICENSE" "$licenses/Cloakd-Render-LICENSE.txt"
 Compress-Archive -Path "$licenses/*" -DestinationPath "$bundle/Third-party-licenses.zip" -Force
+python .github/scripts/package-linux-helpers.py --output "$bundle/SixBox-Linux-Helpers.zip"
+if ($LASTEXITCODE -ne 0) { throw 'Linux helper packaging failed.' }
 Get-ChildItem $bundle -File | Sort-Object Name | ForEach-Object {
     "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
 } | Set-Content "$bundle/SHA256SUMS.txt" -Encoding ascii

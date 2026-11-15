@@ -670,6 +670,9 @@ NAMESPACE_BEGIN(Vars)
 	NAMESPACE_END(Resolver)
 
 	NAMESPACE_BEGIN(ESP)
+#ifndef TEXTMODE
+#include "../Features/ImGui/Overlay/Linux/settings.inc"
+#endif
 		CVarValues(ActiveGroups, "Active groups", int(0b11111111111111111111111111111111), VISUAL | DROPDOWN_MULTI | DROPDOWN_NOSANITIZATION, nullptr);
 	NAMESPACE_END(ESP)
 

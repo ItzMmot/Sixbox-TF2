@@ -1,4 +1,7 @@
 #include "Glow.h"
+#ifndef TEXTMODE
+#include "../../ImGui/Overlay/Linux/model_capture.hpp"
+#endif
 
 #include "../Visuals.h"
 #include "../Groups/Groups.h"
@@ -161,6 +164,9 @@ void CGlow::Store(CTFPlayer* pLocal)
 
 		Color_t tColor = F::Groups.GetColor(pEntity, pGroup);
 		Color_t tBacktrackColor = tColor;
+#ifndef TEXTMODE
+#include "../../ImGui/Overlay/Linux/model_store.inc"
+#endif
 		if (pGroup->m_tGlow() && !pEntity->IsWearableVM()
 			&& GetDistanceThing(flDistance, pGroup->m_tGlow, tColor) && SDK::IsOnScreen(pEntity, pEntity->IsBaseCombatWeapon() || pEntity->IsWearable()))
 			m_mEntities[pGroup->m_tGlow].emplace_back(pEntity, tColor);
@@ -195,6 +201,9 @@ void CGlow::Store(CTFPlayer* pLocal)
 
 void CGlow::RenderFirst()
 {
+#ifndef TEXTMODE
+    LocalModel::BeginFrame();
+#endif
 	auto pRenderContext = I::MaterialSystem->GetRenderContext();
 	if (!pRenderContext || !m_pMatGlowColor || !m_pRenderBuffer1 || !m_pMatHaloAddToScreen)
 		return;
@@ -204,6 +213,10 @@ void CGlow::RenderFirst()
 	{
 		for (auto& tInfo : vInfo)
 		{
+#ifndef TEXTMODE
+            // External silhouettes build their own stencil surface in RenderSecond.
+            if (tInfo.m_bExternal || LocalModel::Route(tInfo.m_pEntity,tInfo.m_iFlags)) continue;
+#endif
 			m_iFlags = tInfo.m_iFlags;
 			DrawModel(tInfo.m_pEntity);
 			m_iFlags = false;
@@ -214,6 +227,9 @@ void CGlow::RenderFirst()
 
 void CGlow::RenderSecond()
 {
+#ifndef TEXTMODE
+#include "../../ImGui/Overlay/Linux/model_render.inc"
+#endif
 	auto pRenderContext = I::MaterialSystem->GetRenderContext();
 	if (!pRenderContext || !m_pMatGlowColor)
 		return;
@@ -365,6 +381,9 @@ void CGlow::Initialize()
 	SDK::CInitTimingScope tInit("Glow.Initialize");
 	int nWidth, nHeight; I::MatSystemSurface->GetScreenSize(nWidth, nHeight);
 	const bool bDx9Shaders = SDK::SupportsDX9Shaders();
+#ifndef TEXTMODE
+    if (bDx9Shaders) LocalModel::Initialize();
+#endif
 
 	if (!m_pMatGlowColor || m_pMatGlowColor->IsErrorMaterial())
 	{
@@ -433,6 +452,9 @@ void CGlow::Initialize()
 
 void CGlow::Unload()
 {
+#ifndef TEXTMODE
+    LocalModel::Unload();
+#endif
 	if (m_pMatGlowColor)
 	{
 		m_pMatGlowColor->DecrementReferenceCount();

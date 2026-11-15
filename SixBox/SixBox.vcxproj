@@ -841,6 +841,16 @@
     <ClInclude Include="src\Features\Visuals\SkinChanger\InventoryWeaponPolicy.h" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\WeaponModelPolicy.h" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\WearableLoadoutPolicy.h" />
+    <ClInclude Include="src\Features\ImGui\Overlay\Linux\mask_codec.hpp" />
+    <ClInclude Include="src\Features\ImGui\Overlay\Linux\menu.inc" />
+    <ClInclude Include="src\Features\ImGui\Overlay\Linux\model_capture.hpp" />
+    <ClInclude Include="src\Features\ImGui\Overlay\Linux\model_policy.hpp" />
+    <ClInclude Include="src\Features\ImGui\Overlay\Linux\model_render.inc" />
+    <ClInclude Include="src\Features\ImGui\Overlay\Linux\model_store.inc" />
+    <ClInclude Include="src\Features\ImGui\Overlay\Linux\model_transport.hpp" />
+    <ClInclude Include="src\Features\ImGui\Overlay\Linux\overlay.hpp" />
+    <ClInclude Include="src\Features\ImGui\Overlay\Linux\settings.inc" />
+    <ClInclude Include="src\Features\ImGui\Overlay\Linux\status.hpp" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\GoldKillPolicy.h" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\SkinProfile.h" />
     <ClInclude Include="src\Features\Visuals\SkinChanger\SkinData.h" />
