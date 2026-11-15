@@ -27,7 +27,18 @@ jobs:
           set -euo pipefail
           for test in aim_policy burst_planner seam_geometry splash_window animation_timeline sticky_search auto_trolldier spy_knife jump_coach jump_coach_smoothing menu_background material_registry identity_migration group_snapshots inventory_classes inventory_weapon_policy weapon_model_policy gold_kill_policy karaoke karaoke_geometry sandevistan; do
             g++ -std=c++20 -O2 -I SixBox/include -pthread -Wall -Wextra -Werror "tests/${test}_test.cpp" -o "${RUNNER_TEMP}/${test}_test"
-            "${RUNNER_TEMP}/${test}_test"
+            if ! "${RUNNER_TEMP}/${test}_test" > "${RUNNER_TEMP}/${test}.log" 2>&1; then
+              cat "${RUNNER_TEMP}/${test}.log"
+              python3 - "$test" "${RUNNER_TEMP}/${test}.log" <<'PYERROR'
+          import pathlib, sys
+          name, log = sys.argv[1:]
+          message = pathlib.Path(log).read_text(errors='replace')[-3000:]
+          message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print(f'::error file=tests/{name}_test.cpp::{name} regression failed: {message}')
+          PYERROR
+              exit 1
+            fi
+            cat "${RUNNER_TEMP}/${test}.log"
           done
 
   overlay:
