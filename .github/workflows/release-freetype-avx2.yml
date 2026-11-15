@@ -87,6 +87,9 @@ jobs:
           nuget restore SixBox.sln -NonInteractive
           if ($LASTEXITCODE -ne 0) { throw 'NuGet restore failed.' }
 
+      - name: Test release asset recovery
+        run: python tests/release_upload_test.py
+
       - name: Build FreeType and AVX2 DLL
         run: ./.github/scripts/build-release-freetype.ps1
 
@@ -103,16 +106,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          $assets = @(Get-ChildItem output/release -File | ForEach-Object FullName)
           gh release view $env:RELEASE_TAG *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:RELEASE_TAG @assets --clobber
-          } else {
+          if ($LASTEXITCODE -ne 0) {
             $options = @('--verify-tag', '--title', "SixBox TF2 $env:RELEASE_TAG (FreeType AVX2)", '--generate-notes')
             if ($env:RELEASE_TAG -match '-') { $options += '--prerelease' }
-            gh release create $env:RELEASE_TAG @assets @options
+            gh release create $env:RELEASE_TAG @options
           }
-          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Release creation failed.' }
+          python .github/scripts/upload-release-assets.py --tag $env:RELEASE_TAG --directory output/release
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed.' }
 
       - name: Publish rolling nightly release
         if: env.RELEASE_TAG == 'nightly'
@@ -146,13 +148,12 @@ jobs:
 
           Download SixBoxx64ReleaseFreetypeAVX2.dll below. Linux/Proton optional features use SixBox-Linux-Helpers.zip; see its docs/overlay.md and docs/karaoke.md. Third-party licenses and SHA256 checksums are included.
           "@ | Set-Content $notes -Encoding utf8
-          $assets = @(Get-ChildItem output/release -File | ForEach-Object FullName)
           gh release view nightly *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload nightly @assets --clobber
-            if ($LASTEXITCODE -ne 0) { throw 'Nightly asset upload failed.' }
-            gh release edit nightly --title 'SixBox TF2 Nightly (FreeType AVX2)' --notes-file $notes --prerelease --latest=false
-          } else {
-            gh release create nightly @assets --verify-tag --title 'SixBox TF2 Nightly (FreeType AVX2)' --notes-file $notes --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) {
+            gh release create nightly --verify-tag --title 'SixBox TF2 Nightly (FreeType AVX2)' --notes-file $notes --prerelease --latest=false
+            if ($LASTEXITCODE -ne 0) { throw 'Nightly release creation failed.' }
           }
+          python .github/scripts/upload-release-assets.py --tag nightly --directory output/release
+          if ($LASTEXITCODE -ne 0) { throw 'Nightly asset upload failed.' }
+          gh release edit nightly --title 'SixBox TF2 Nightly (FreeType AVX2)' --notes-file $notes --prerelease --latest=false
           if ($LASTEXITCODE -ne 0) { throw 'Nightly release publication failed.' }

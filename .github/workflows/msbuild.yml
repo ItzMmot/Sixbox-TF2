@@ -14,6 +14,7 @@ jobs:
       - name: Validate local build cache and installation
         run: |
           python3 tests/build_local_dll_test.py
+          python3 tests/release_upload_test.py
           python3 tests/skin_config_test.py
           python3 tests/gold_kill_integration_test.py
           python3 tests/inventory_owned_weapon_test.py
