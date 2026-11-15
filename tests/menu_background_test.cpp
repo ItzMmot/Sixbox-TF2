@@ -4,10 +4,16 @@
 #include <limits>
 #include <cstdlib>
 #include <new>
+// Keep replacement allocation functions visible as a matching pair to GCC's diagnostics.
+#if defined(_MSC_VER)
+#define TEST_NOINLINE __declspec(noinline)
+#else
+#define TEST_NOINLINE __attribute__((noinline))
+#endif
 static unsigned allocations=0;
-void* operator new(std::size_t n) {++allocations;if(auto* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
-void operator delete(void* p) noexcept {std::free(p);}
-void operator delete(void* p,std::size_t) noexcept {std::free(p);}
+TEST_NOINLINE void* operator new(std::size_t n) {++allocations;if(auto* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
+TEST_NOINLINE void operator delete(void* p) noexcept {std::free(p);}
+TEST_NOINLINE void operator delete(void* p,std::size_t) noexcept {std::free(p);}
 using namespace MenuBackground;
 static bool InQuad(const Quad& q,V p)
 {

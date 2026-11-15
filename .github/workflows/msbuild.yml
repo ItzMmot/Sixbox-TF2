@@ -32,7 +32,9 @@ jobs:
               python3 - "$test" "${RUNNER_TEMP}/${test}.log" <<'PYERROR'
           import pathlib, sys
           name, log = sys.argv[1:]
-          message = pathlib.Path(log).read_text(errors='replace')[-3000:]
+          output = pathlib.Path(log).read_text(errors='replace')
+          diagnostics = '\n'.join(line for line in output.splitlines() if 'error:' in line)
+          message = diagnostics[:2000] + '\n' + output[-3000:]
           message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
           print(f'::error file=tests/{name}_test.cpp::{name} regression failed: {message}')
           PYERROR
