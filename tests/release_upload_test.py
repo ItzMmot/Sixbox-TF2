@@ -35,6 +35,8 @@ class Server:
             self.stored = [a for a in self.stored if a['id'] != identity]
             return ''
         if args[:2] == ('release', 'upload'):
+            if any(a['name'].casefold() == self.path.name.casefold() for a in self.stored):
+                raise upload.UploadError('HTTP 422: ReleaseAsset.name already exists')
             if self.failures:
                 failure = self.failures.pop(0)
                 if failure == 'accepted':
@@ -69,6 +71,26 @@ class UploadTest(unittest.TestCase):
         self.run_upload()
         self.assertEqual([a['name'] for a in self.server.stored], ['unrelated.zip', self.path.name])
         self.assertEqual(self.delays, [])
+
+    def test_historical_sixbox_capitalization_is_replaced(self):
+        # Real nightly names were Sixboxx64..., while the current build is SixBoxx64....
+        for suffix in ['.dll', '.pdb']:
+            for same_bytes in [False, True]:
+                with self.subTest(suffix=suffix, same_bytes=same_bytes):
+                    self.path = self.path.with_suffix(suffix)
+                    self.path.write_bytes(b'new release')
+                    self.server = Server(self.path)
+                    legacy = self.server.asset()
+                    legacy['name'] = self.path.name.replace('SixBox', 'Sixbox')
+                    if not same_bytes:
+                        legacy['digest'] = 'sha256:old'
+                    self.server.stored.append(legacy)
+                    self.run_upload()
+                    self.assertEqual([a['name'] for a in self.server.stored],
+                                     ['unrelated.zip', self.path.name])
+                    self.assertTrue(any(call[:3] == ('api', '--method', 'DELETE')
+                                        for call in self.server.calls))
+                    self.assertEqual(self.delays, [])
 
     def test_duplicate_and_starter_recovery(self):
         for error in ['HTTP 422: Validation Failed; ReleaseAsset.name already exists', 'HTTP 502: Bad Gateway']:

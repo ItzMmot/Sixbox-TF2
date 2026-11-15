@@ -49,11 +49,14 @@ def upload(repo, tag, release_id, path, attempts=4, sleep=time.sleep):
     digest = 'sha256:' + checksum.hexdigest()
     for attempt in range(attempts):
         try:
-            existing = [a for a in assets(repo, release_id) if a['name'] == path.name]
+            existing = [a for a in assets(repo, release_id) if a['name'].casefold() == path.name.casefold()]
             # A lost upload response need not force another large transfer.
-            if len(existing) == 1 and matches(existing[0], path, digest):
+            if (len(existing) == 1 and existing[0]['name'] == path.name
+                    and matches(existing[0], path, digest)):
                 print(f'Verified existing asset: {path.name}', flush=True)
                 return
+            # GitHub rejects case-only name collisions (Sixbox vs SixBox).
+            # Replace those too, even if the bytes match, to keep download URLs canonical.
             for asset in existing:
                 try:
                     gh('api', '--method', 'DELETE', f"repos/{repo}/releases/assets/{asset['id']}")
@@ -61,8 +64,9 @@ def upload(repo, tag, release_id, path, attempts=4, sleep=time.sleep):
                     if 'HTTP 404' not in str(error):
                         raise
             gh('release', 'upload', tag, str(path.resolve()), '--repo', repo)
-            uploaded = [a for a in assets(repo, release_id) if a['name'] == path.name]
-            if (len(uploaded) != 1 or uploaded[0].get('state') != 'uploaded'
+            uploaded = [a for a in assets(repo, release_id) if a['name'].casefold() == path.name.casefold()]
+            if (len(uploaded) != 1 or uploaded[0]['name'] != path.name
+                    or uploaded[0].get('state') != 'uploaded'
                     or uploaded[0].get('size') != path.stat().st_size
                     or (uploaded[0].get('digest') and uploaded[0]['digest'] != digest)):
                 raise UploadError(f'Verification failed for {path.name}')

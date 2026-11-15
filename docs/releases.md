@@ -48,7 +48,9 @@ inside a Windows runner with Visual Studio 2022, CMake and restored NuGet packag
 
 Both versioned releases and nightly upload one asset at a time through
 `.github/scripts/upload-release-assets.py`. Only conflicting files with the same
-name are replaced; unrelated release assets are retained. A matching existing
+name, ignoring case, are replaced; unrelated release assets are retained.
+Historical `Sixboxx64...` files are replaced by canonical `SixBoxx64...` names,
+even when the bytes are identical, so download links use the current spelling. A matching existing
 SHA256 skips the transfer. Each upload is checked for uploaded state, size and
 SHA256 when GitHub provides it.
 
