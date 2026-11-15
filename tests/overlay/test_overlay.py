@@ -94,7 +94,7 @@ class RenderTest(unittest.TestCase):
                     self.assertFalse(any(overlay.object.errors.values()),overlay.object.errors)
                     image=overlay.window.grabWindow()
                     self.assertFalse(image.isNull())
-                    image.save(str(ROOT/'tests/overlay/overlay'/f'preview-{mask}.png'))
+                    image.save(str(ROOT/'tests/overlay'/f'preview-{mask}.png'))
                     # Pixel inside left edge (box); background otherwise transparent.
                     alpha=image.pixelColor(round(200*image.devicePixelRatio()),round(140*image.devicePixelRatio())).alpha()
                     self.assertEqual(alpha>0,bool(mask&1))
@@ -248,7 +248,7 @@ class RenderTest(unittest.TestCase):
                     combined=image(flags=3,style=style,radius=12.,thickness=3.)
                     self.assertGreater(combined.pixelColor(194,140).alpha(),0)
                     self.assertEqual(combined.pixelColor(250,230).alpha(),0)
-                    combined.save(str(ROOT/'tests/overlay/overlay'/f'preview-effects-{style}.png'))
+                    combined.save(str(ROOT/'tests/overlay'/f'preview-effects-{style}.png'))
             finally:overlay.close();self.app.processEvents()
 
     def test_missing_capture_policy_stays_hidden(self):

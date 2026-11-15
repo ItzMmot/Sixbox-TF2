@@ -7,7 +7,7 @@ import time
 import unittest
 
 ROOT=Path(__file__).resolve().parents[2]
-sys.path[:0]=[str(ROOT/'scripts/overlay'),str(ROOT/'tests/overlay/overlay')]
+sys.path[:0]=[str(ROOT/'scripts/overlay'),str(ROOT/'tests/overlay')]
 os.environ['QT_QPA_PLATFORM']='offscreen';os.environ['QT_QUICK_BACKEND']='software'
 from model_image import HEADER,decode,Reader,FILETIME_EPOCH
 from protocol import HEADER_V2,atomic_write
