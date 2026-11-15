@@ -61,3 +61,6 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+# Shader source digests must match on Windows and Linux checkouts.
+*.hlsl text eol=lf
