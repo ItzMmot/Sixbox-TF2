@@ -1,6 +1,7 @@
 #pragma once
 #include "../../../SDK/SDK.h"
 #include "WearableLoadoutPolicy.h"
+#include "LocalInventoryProtocol.h"
 
 #include <mutex>
 #include "SkinProfile.h"
@@ -57,6 +58,7 @@ class CSkinChanger
 		CBaseEntity* pEntity = nullptr;
 		int iOriginal = -1;
 		int iApplied = -1;
+        unsigned uSkinHash = 0;
 	};
 
 	std::mutex m_tMutex;
@@ -77,8 +79,11 @@ class CSkinChanger
 		uint64_t uKey = 0;
 		uint64_t uCrate = 0;
 		uint64_t uTick = 0;
+		uint64_t uSourceJob = ~uint64_t(0);
+		bool bNotifyGC = false;
 	};
 	std::vector<PendingCrate_t> m_vPendingCrates = {};
+	LocalInventoryProtocol::Responses m_tLocalResponses;
 	std::vector<PendingCrate_t> m_vPendingPaints = {};
 	std::unordered_map<uint64_t, uint64_t> m_mAwaitingPosition = {};
 	HeldWeapon_t m_tHeld;
@@ -162,6 +167,8 @@ public:
 	bool IsClientItem(uint64_t uItemID);
 	void* GetClientSOCData(uint64_t uItemID);
 	bool OnSendMessage(void* pMessage);
+	bool LocalMessageAvailable(uint32_t* pSize);
+	EGCResults RetrieveLocalMessage(uint32_t* pType, void* pDestination, uint32_t uCapacity, uint32_t* pSize);
 	uint64_t FindOwnedWeapon(uint64_t uClientItemID, int iClass, int iSlot);
 	bool IsReplacedWearableItem(uint64_t uItemID);
 	void ApplyLocalLoadout(uint64_t uItemID, int iClass, int iSlot);

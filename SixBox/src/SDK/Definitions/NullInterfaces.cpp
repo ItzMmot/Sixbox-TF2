@@ -68,5 +68,10 @@ bool CNullInterfaces::Initialize()
 	I::SteamMatchmakingServers = I::SteamClient->GetISteamMatchmakingServers(hUser, hPipe, STEAMMATCHMAKINGSERVERS_INTERFACE_VERSION);
 	ValidateSteam(I::SteamMatchmakingServers);
 
+#ifndef TEXTMODE
+	I::SteamGameCoordinator = static_cast<ISteamGameCoordinator*>(I::SteamClient->GetISteamGenericInterface(hUser, hPipe, STEAMGAMECOORDINATOR_INTERFACE_VERSION));
+	ValidateSteam(I::SteamGameCoordinator);
+#endif
+
 	return !m_bFailed;
 }

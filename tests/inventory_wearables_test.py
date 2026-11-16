@@ -57,13 +57,14 @@ struct CTFPlayer {
 struct CEconWearable {
  // The production item-view accessor points at offset zero in this fixture.
  CEconItemView view;int handle=++registryID,effects=0,equips=0,unequips=0,updates=0;
- CTFPlayer* owner=nullptr;bool vm=false,released=false;
+ CTFPlayer* owner=nullptr;CTFPlayer* parent=nullptr;bool vm=false,released=false;
  CEconWearable(){registry[handle]=this;}
  auto GetRefEHandle(){return CHandle<CEconWearable>(this);}
  int& m_fEffects(){return effects;}CTFPlayer* GetOwnerEntity(){return owner;}
+ CTFPlayer* GetMoveParent(){return parent;}
  bool IsWearableVM(){return vm;}
- void Equip(CTFPlayer* player){++equips;if(owner==player)return;if(owner&&view.pyro)--owner->cosmeticVision;owner=player;if(owner&&view.pyro)++owner->cosmeticVision;}
- void UnEquip(CTFPlayer*){++unequips;if(owner&&view.pyro)--owner->cosmeticVision;owner=nullptr;}
+ void Equip(CTFPlayer* player){++equips;parent=player;if(owner==player)return;if(owner&&view.pyro)--owner->cosmeticVision;owner=player;if(owner&&view.pyro)++owner->cosmeticVision;}
+ void UnEquip(CTFPlayer*){++unequips;parent=nullptr;if(owner&&view.pyro)--owner->cosmeticVision;owner=nullptr;}
  void ReleaseClientEntity(){assert(!owner);released=true;registry.erase(handle);}
  CEconWearable* GetClientNetworkable(){return this;}void OnDataChanged(int){++updates;}
 };
@@ -72,10 +73,12 @@ struct ItemInfo {bool bCosmetic=false;};
 std::unordered_map<int,ItemInfo> catalogue;
 const ItemInfo* FindItemInfo(uint16_t def){auto it=catalogue.find(def);return it==catalogue.end()?nullptr:&it->second;}
 bool ResizeWearables(CTFPlayer* p,int count){if(count<0||count>kMaxWearables)return false;p->list.data.resize(count);return true;}
+void WearableDiagnostic(int,int,const char*){}
 int hudRefreshes=0;void RefreshInventoryHudModel(){++hudRefreshes;}
 constexpr int WARNING_COLOR=1;
 namespace SDK{void Output(const char*,const char*,int){assert(false&&"Unexpected tracking overflow");}}
 namespace Vars::Visuals::SkinChanger {struct Toggle{bool Value=true;};Toggle Enabled;}
+namespace I {struct State{int m_nDeltaTick=1;};State state;State* ClientState=&state;}
 struct Inventory {
  std::map<uint64_t,CEconItemView> views;std::map<std::pair<int,int>,uint64_t> selected;
  CEconItemView* GetItemInLoadout(int cls,int slot){
@@ -194,9 +197,9 @@ int main(){
  // Explicit empty cosmetics means completely empty cosmetics, preserving weapon wearables.
  c.loadout={{19+7,0}};c.UpdateWearables(&player);
  assert(Clones(c)==0&&player.list.Count()==1&&Has(player,shield)&&player.cosmeticVision==0);
- // Failed entity creation retries without leaking clones or attribute provision.
+ // Failed entity creation keeps native clothes visible and retries without leaks.
  c.loadout={{19+7,10002}};c.failNextCreate=true;c.UpdateWearables(&player);
- assert(Clones(c)==0&&player.cosmeticVision==0);
+ assert(Clones(c)==0&&player.cosmeticVision==1&&Has(player,hat)&&Has(player,glasses));
  c.UpdateWearables(&player);assert(Clones(c)==1&&player.cosmeticVision==1);
  player.cls=2;c.UpdateWearables(&player);assert(Clones(c)==0&&Has(player,glasses)&&player.cosmeticVision==1);
  // The server has transferred a hidden entity to a different player: never steal it back.
@@ -207,6 +210,39 @@ int main(){
  // player before it was ever tracked. Do not unequip that new owner either.
  auto* transferred=AddNative(player,c,102,99);transferred->Equip(&other);
  c.UpdateWearables(&player);assert(transferred->owner==&other&&!(transferred->effects&EF_NODRAW));
+ // An engine resend can leave live local entities out of the wearable vector.
+ {
+  CTFPlayer p;CSkinChanger recovery;
+  recovery.inv.views[10001]={102,10001,false,{}};recovery.loadout[19+7]=10001;
+  recovery.UpdateWearables(&p);
+  auto* clone=recovery.m_aWearables[7].hEntity.Get();assert(clone);
+  const int equips=clone->equips,updates=clone->updates,dirty=p.dirty;
+  p.list.data.clear();recovery.UpdateWearables(&p);
+  assert(Has(p,clone)&&clone->equips==equips+1&&clone->updates==updates+1&&p.dirty>dirty);
+  // Validation also requires a move parent, even if ownership/list membership survive.
+  clone->parent=nullptr;recovery.UpdateWearables(&p);
+  assert(clone->parent==&p&&clone->equips==equips+2);
+  // Full packets must release old local clothes before rebuilding their attachments.
+  I::state.m_nDeltaTick=-1;const int made=recovery.created;
+  recovery.UpdateWearables(&p);assert(Clones(recovery)==0&&clone->released&&recovery.created==made);
+  I::state.m_nDeltaTick=1;recovery.UpdateWearables(&p);assert(Clones(recovery)==1);
+  recovery.ResetWearables(&p);
+ }
+ // Released entities can still occupy every entry in the local vector.
+ // Recycle these entries; the count must not block recreation indefinitely.
+ {
+  CTFPlayer p;CSkinChanger recovery;
+  recovery.inv.views[10001]={102,10001,false,{}};recovery.loadout[19+7]=10001;
+  recovery.UpdateWearables(&p);auto* old=recovery.m_aWearables[7].hEntity.Get();
+  old->UnEquip(&p);registry.erase(old->handle);
+  while(p.list.Count()<kMaxWearables){CHandle<CEconWearable> stale;stale.id=100000+p.list.Count();p.list.data.push_back(stale);}
+  recovery.UpdateWearables(&p);
+  assert(Clones(recovery)==1&&Has(p,recovery.m_aWearables[7].hEntity.Get()));
+  // Reset/class changes must also remove the saved handle after engine deletion.
+  auto* current=recovery.m_aWearables[7].hEntity.Get();const int saved=current->handle;
+  current->UnEquip(&p);registry.erase(saved);recovery.ResetWearables(&p);
+  for(auto h:p.list.data)assert(h.id!=saved);
+ }
  // Stale handles are dropped, not dereferenced or restored to reused entities.
  c.UpdateWearables(&player);registry.erase(hat->handle);c.ResetWearables(&player);
  assert(!c.m_hWearableOwner.IsValid());

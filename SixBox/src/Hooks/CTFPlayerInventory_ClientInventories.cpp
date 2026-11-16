@@ -12,6 +12,23 @@ MAKE_SIGNATURE(CGCClient_SendMessage, "client.dll", "48 83 EC 28 44 8B 4A 18 4C 
 
 #ifndef TEXTMODE
 
+MAKE_HOOK(ISteamGameCoordinator_IsMessageAvailable, U::Memory.GetVirtual(I::SteamGameCoordinator, 1), bool,
+	void* rcx, uint32_t* pSize)
+{
+	DEBUG_RETURN(ISteamGameCoordinator_IsMessageAvailable, rcx, pSize);
+	return (rcx == I::SteamGameCoordinator && F::SkinChanger.LocalMessageAvailable(pSize)) || CALL_ORIGINAL(rcx, pSize);
+}
+
+MAKE_HOOK(ISteamGameCoordinator_RetrieveMessage, U::Memory.GetVirtual(I::SteamGameCoordinator, 2), EGCResults,
+	void* rcx, uint32_t* pType, void* pDestination, uint32_t uCapacity, uint32_t* pSize)
+{
+	DEBUG_RETURN(ISteamGameCoordinator_RetrieveMessage, rcx, pType, pDestination, uCapacity, pSize);
+	if (rcx != I::SteamGameCoordinator)
+		return CALL_ORIGINAL(rcx, pType, pDestination, uCapacity, pSize);
+	const auto result = F::SkinChanger.RetrieveLocalMessage(pType, pDestination, uCapacity, pSize);
+	return result != k_EGCResultNoMessage ? result : CALL_ORIGINAL(rcx, pType, pDestination, uCapacity, pSize);
+}
+
 MAKE_HOOK(CTFPlayerInventory_GetSOCDataForItem, S::CTFPlayerInventory_GetSOCDataForItem(), void*,
 	void* rcx, uint64_t uItemID, uint64_t a3, uint64_t a4)
 {
