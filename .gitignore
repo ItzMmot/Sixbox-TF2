@@ -384,6 +384,9 @@ MenuUI.zip
 # Temporary local implementation plan
 /TODO.local.md
 
+# Machine-local direct Wine build
+/build-wine.local.py
+
 # Local visual references
 /DeadCode-1.19.4-refactor.zip
 /DeadcodeFabric-master.zip

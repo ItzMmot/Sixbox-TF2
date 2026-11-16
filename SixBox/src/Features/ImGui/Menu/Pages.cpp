@@ -1252,18 +1252,6 @@ static void MiscMain()
 		FDropdown(AutoEdgebug, FDropdownEnum::None, -28);
 		FColorPicker(Vars::Colors::EdgebugPath);
 
-		Subheader("Auto dodge");
-		FToggle(AutoDodge::Enabled);
-		PushTransparent(!AutoDodge::Enabled.Value);
-		FSlider(AutoDodge::PredictionTime);
-		FSlider(AutoDodge::CalculationBudget);
-		FSlider(AutoDodge::SafetyMargin);
-		FToggle(AutoDodge::Jump);
-		FToggle(AutoDodge::Duck);
-		FToggle(AutoDodge::AvoidStickies);
-		FNote("Prioritizes imminent impacts and splash. The calculation budget reserves movement time; a minimum escape comparison may exceed it. Suspended during tick shifts and warp.");
-		PopTransparent();
-
 		Subheader("Jumping");
 		FToggle(Bunnyhop);
 		FToggle(EdgeJump);
@@ -1281,29 +1269,6 @@ static void MiscMain()
 		FToggle(AutoFaNJump);
 		FToggle(AutoRevJump);
 
-		Subheader("Auto trolldier");
-		FToggle(AutoTrolldier::Enabled);
-		PushTransparent(!AutoTrolldier::Enabled.Value);
-		{
-			FToggle(AutoTrolldier::AutoMarketGardenerSwap);
-			FToggle(AutoTrolldier::AutoAimbot);
-			FSlider(AutoTrolldier::MaxDistance);
-			FSlider(AutoTrolldier::PredictionTime);
-			FSlider(AutoTrolldier::MaxTargets);
-			FSlider(AutoTrolldier::TraceBudget);
-			FToggle(AutoTrolldier::CancelOnInput);
-			FDropdown(AutoTrolldier::Rotation);
-			PushTransparent(AutoTrolldier::Rotation.Value != AutoTrolldier::RotationEnum::Legit && AutoTrolldier::Rotation.Value != AutoTrolldier::RotationEnum::LegitSilent);
-			FSlider(AutoTrolldier::RotationSpeed);
-			PopTransparent();
-			FToggle(AutoTrolldier::DrawPath);
-			FColorPicker(AutoTrolldier::PathColor);
-			FToggle(AutoTrolldier::PathThroughWalls);
-			FNote("Auto MG swap returns to the launcher after the swing resolves, including an unconfirmed hit. Auto aimbot temporarily enables your bound aim mode and Auto shoot for the strike.");
-		}
-		PopTransparent();
-
-
 		Subheader("Control");
 		FToggle(FastStop);
 		PushDisabled(F::AntiCheatCompatibility.Active());
@@ -1315,6 +1280,22 @@ static void MiscMain()
 		FToggle(MovementLock);
 		FToggle(ShieldTurnRate);
 		FToggle(NoPush);
+	} EndSection();
+	if (Section("Auto dodge"))
+	{
+		using namespace Vars::Misc::Movement;
+		FToggle(AutoDodge::Enabled);
+		PushTransparent(!AutoDodge::Enabled.Value);
+		{
+			FSlider(AutoDodge::PredictionTime);
+			FSlider(AutoDodge::CalculationBudget);
+			FSlider(AutoDodge::SafetyMargin);
+			FToggle(AutoDodge::Jump);
+			FToggle(AutoDodge::Duck);
+			FToggle(AutoDodge::AvoidStickies);
+			FNote("Prioritizes imminent impacts and splash. The calculation budget reserves movement time; a minimum escape comparison may exceed it. Suspended during tick shifts and warp.");
+		}
+		PopTransparent();
 	} EndSection();
 	if (Vars::Debug::Options.Value)
 	{
@@ -1352,6 +1333,30 @@ static void MiscMain()
 	}
 
 	TableNextColumn();
+	if (Section("Auto trolldier"))
+	{
+		using namespace Vars::Misc::Movement;
+		FToggle(AutoTrolldier::Enabled);
+		PushTransparent(!AutoTrolldier::Enabled.Value);
+		{
+			FToggle(AutoTrolldier::AutoMarketGardenerSwap);
+			FToggle(AutoTrolldier::AutoAimbot);
+			FSlider(AutoTrolldier::MaxDistance);
+			FSlider(AutoTrolldier::PredictionTime);
+			FSlider(AutoTrolldier::MaxTargets);
+			FSlider(AutoTrolldier::TraceBudget);
+			FToggle(AutoTrolldier::CancelOnInput);
+			FDropdown(AutoTrolldier::Rotation);
+			PushTransparent(AutoTrolldier::Rotation.Value != AutoTrolldier::RotationEnum::Legit && AutoTrolldier::Rotation.Value != AutoTrolldier::RotationEnum::LegitSilent);
+			FSlider(AutoTrolldier::RotationSpeed);
+			PopTransparent();
+			FToggle(AutoTrolldier::DrawPath);
+			FColorPicker(AutoTrolldier::PathColor);
+			FToggle(AutoTrolldier::PathThroughWalls);
+			FNote("Auto MG swap returns to the launcher after the swing resolves, including an unconfirmed hit. Auto aimbot temporarily enables your bound aim mode and Auto shoot for the strike.");
+		}
+		PopTransparent();
+	} EndSection();
 	if (Section("Exploits"))
 	{
 		FToggle(Vars::Misc::Exploits::PureBypass);
