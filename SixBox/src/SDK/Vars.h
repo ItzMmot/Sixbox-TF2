@@ -1034,6 +1034,30 @@ NAMESPACE_BEGIN(Vars)
 				VA_LIST("Diagonal", "Vertical", "Horizontal"), Diagonal, Vertical, Horizontal);
 			CVar(AutoRocketJumpWalls, "Wall rocket jumps", false);
 			CVar(AutoRocketJumpWallDistance, "Wall search distance", 112.f, SLIDER_CLAMP, 32.f, 160.f, 4.f, "%g HU");
+            NAMESPACE_BEGIN(AutoStickyJump)
+                CVar(Enabled, "Auto sticky jump", false);
+                CVarEnum(Mode, "Sticky jump mode", 0, NONE, nullptr, VA_LIST("Horizontal", "Vertical"), Horizontal, Vertical);
+                CVarEnum(Rotation, "Sticky jump rotation", 1, NONE, nullptr, VA_LIST("Plain", "Silent", "Legit", "Silent legit"), Plain, Silent, Legit, SilentLegit);
+                CVar(RotationSpeed, "Sticky rotation speed", 25.f, SLIDER_CLAMP, 10.f, 55.f, 1.f);
+                CVar(AutoWalk, "Auto walk to takeoff", false);
+                CVar(ApproachDistance, "Minimum takeoff distance", 96.f, SLIDER_CLAMP, 32.f, 512.f, 8.f, "%g HU");
+                CVar(Stickies, "Sticky count", 1, SLIDER_CLAMP, 1, 2, 1);
+                CVar(Doubletap, "Sticky doubletap", false);
+                CVar(FlushFirst, "Flush first", false);
+                CVar(PreserveTraps, "Preserve existing traps", true);
+                CVar(Repeat, "Repeat on landing", false);
+                CVar(CoachIntegration, "Jump coach flight preview", true);
+                CVar(DrawPath, "Sticky approach path", true, VISUAL);
+                CVar(DrawTrajectory, "Sticky trajectory", true, VISUAL);
+                CVar(DrawArrow, "Takeoff arrow", true, VISUAL);
+                CVar(DrawSilhouette, "Takeoff silhouette", true, VISUAL);
+                CVar(DrawHUD, "Sticky jump status", true, VISUAL);
+                CVar(ThroughWalls, "Sticky plan through walls", false, VISUAL);
+                CVar(MarkerScale, "Takeoff marker scale", 1.f, VISUAL | SLIDER_CLAMP, .5f, 2.f, .1f);
+                CVar(PathColor, "Sticky path color", Color_t(126,186,255,225), VISUAL);
+                CVar(LaunchColor, "Sticky launch color", Color_t(150,240,180,210), VISUAL);
+                CVar(ShotColor, "Sticky trajectory color", Color_t(255,186,100,210), VISUAL);
+            NAMESPACE_END(AutoStickyJump)
 			NAMESPACE_BEGIN(JumpCoach)
                 CVar(Enabled, VA_LIST("Jump coach", "Jump coach enabled"), false, VISUAL);
                 CVar(SoldierOnly, "Coach soldier only", false, VISUAL);

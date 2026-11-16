@@ -46,6 +46,11 @@ namespace Sandevistan
             time=now;yaw=nextYaw;pitch=nextPitch;
         }
     };
+    inline float BehindOffset(float rank,float extension)
+    {
+        if(!std::isfinite(rank)||!std::isfinite(extension)) return 0;
+        return -(1.f-std::clamp(rank,0.f,1.f))*std::max(0.f,extension);
+    }
     inline float TrailExtension(int copies,float travel,float width,float spacing,float spread)
     {
         if(copies<=1)return 0;
@@ -89,6 +94,9 @@ namespace Sandevistan
         const int slot=int(std::lround(double(index)*(copies-1)/(total-1)));
         return int(std::lround(double(slot)*(total-1)/(copies-1)))==index?slot:-1;
     }
+    inline int InputSequence(int original,int wire) {return original>0?original:wire;}
+    inline float CapturedRank(int index,int count)
+    {return count>1?float(std::clamp(index,0,count-1))/float(count-1):0.f;}
     inline float Rank(int slot,int copies,float bias,bool reverse)
     {
         float rank=copies>1?float(slot)/float(copies-1):0.f;

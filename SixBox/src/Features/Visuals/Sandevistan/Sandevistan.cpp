@@ -20,7 +20,7 @@ namespace
         float blend=I::RenderView->GetBlend();
         IMaterial* material=nullptr;OverrideType_t type=OVERRIDE_NORMAL;
         RenderScope(){I::RenderView->GetColorModulation(color);I::ModelRender->GetMaterialOverride(&material,&type);}
-        ~RenderScope(){I::ModelRender->ForcedMaterialOverride(material,type);I::RenderView->SetColorModulation(color);I::RenderView->SetBlend(blend);}
+        ~RenderScope(){I::ModelRender->ForcedMaterialOverride(material,type);I::RenderView->SetColorModulation(color);I::RenderView->SetBlend(blend);I::StudioRender->SetColorModulation(color);I::StudioRender->SetAlphaModulation(blend);}
     };
     bool Allowed(){return V::Enabled.Value && (V::Triggers.Value&3) && !G::Unload;}
     Color_t Color(float rank)
@@ -69,20 +69,20 @@ void CSandevistan::MarkCommand(CTFPlayer* local,CUserCmd* command,int kind,int r
     kind&=V::Triggers.Value&3;
     if(!kind){m_current=0;return;}
     const double now=SDK::PlatFloatTime();
+    const int logical=Sandevistan::InputSequence(G::OriginalCmd.command_number,command->command_number);
     auto* event=FindEvent(m_current);
-    if(!event||event->Split(command->command_number,kind,now))
+    if(!event||event->Split(logical,kind,now))
     {
         if(remaining<1){m_current=0;return;}
         event=&m_events[m_nextEvent];m_nextEvent=(m_nextEvent+1)%int(m_events.size());*event={};
-        event->Start(command->command_number,kind);event->id=++m_serial;m_current=event->id;
+        event->Start(logical,kind);event->id=++m_serial;m_current=event->id;
     }
     const bool confirmed=event->confirmed;
-    if(!event->Append(command->command_number,remaining,now))return;
+    if(!event->Append(logical,remaining,now))return;
     if(!confirmed&&event->confirmed)++m_diagnostics.events;
-    const int index=command->command_number-event->first;
-    const int copies=std::min(std::clamp(V::Copies.Value,1,Sandevistan::MaxCopies),event->total);
-    m_commands[command->command_number%m_commands.size()]={command->command_number,index,event->total,
-        Sandevistan::Sample(index,event->total,copies),copies,event->id,false};
+    // Record every physical command. Sampling and gradient ranks are derived
+    // from the poses actually captured once the burst reaches the renderer.
+    m_commands[command->command_number%m_commands.size()]={command->command_number,logical,event->id,false};
     if(remaining<=0)m_current=0;
 }
 void CSandevistan::CapturePrediction(CTFPlayer* local,CUserCmd* command,float /*simulationTime*/)
@@ -93,23 +93,23 @@ void CSandevistan::CapturePrediction(CTFPlayer* local,CUserCmd* command,float /*
         std::lock_guard lock(m_mutex);
         if(!ValidOwner(local))return;
         auto& stored=m_commands[command->command_number%m_commands.size()];
-        if(stored.number!=command->command_number||stored.consumed||stored.slot<0||!FindEvent(stored.event))return;
+        if(stored.number!=command->command_number||stored.consumed||!FindEvent(stored.event))return;
         metadata=stored;
     }
     const auto* model=local->GetModel();if(!model)return;
     // Store every sampled command even if bones cannot be evaluated inside
     // prediction. Freeze the actual engine-rendered palette on the first draw.
-    Ghost pose;pose.event=metadata.event;pose.command=command->command_number;pose.model=model;
+    Ghost pose;pose.event=metadata.event;pose.command=metadata.logical;pose.model=model;
     pose.origin=local->m_vecOrigin();pose.angles=local->GetAbsAngles();
-    pose.velocity=local->m_vecVelocity();pose.mins=local->m_vecMins();pose.maxs=local->m_vecMaxs();pose.copies=metadata.copies;
+    pose.velocity=local->m_vecVelocity();pose.mins=local->m_vecMins();pose.maxs=local->m_vecMaxs();
     pose.skin=local->m_nSkin();pose.body=local->m_nBody();pose.hitbox=local->m_nHitboxSet();
-    pose.rank=metadata.copies>1?float(metadata.slot)/(metadata.copies-1):0.f;
     std::lock_guard lock(m_mutex);
     auto* event=FindEvent(metadata.event);
     if(!event||m_owner.Get()!=local||m_modelIndex!=local->m_nModelIndex())return;
     auto& stored=m_commands[command->command_number%m_commands.size()];
     if(stored.number!=metadata.number||stored.event!=metadata.event||stored.consumed)return;
     stored.consumed=true;++m_diagnostics.captured;
+    pose.materialSlot=m_nextGhost;
     m_ghosts[m_nextGhost]=pose;m_nextGhost=(m_nextGhost+1)%int(m_ghosts.size());
     m_count=std::min(m_count+1,int(m_ghosts.size()));
 }
@@ -133,9 +133,29 @@ void CSandevistan::InitializeMaterials()
         m_materials[style][depth]=F::Materials.create_from_vmt(name.c_str(),text);
     }
 }
+IMaterial* CSandevistan::TintMaterial(int slot,int style,bool through,Color_t color,float opacity)
+{
+    if(slot<0||slot>=Sandevistan::MaxGhosts+64+32) return nullptr;
+    style=std::clamp(style,0,2);
+    auto*& material=m_tinted[slot][style][through?1:0];
+    if(!material)
+    {
+        const auto name=std::format("SixBoxSandevistanTint_{}_{}_{}",slot,style,through?1:0);
+        const auto text=std::format("\"UnlitGeneric\" {{ \"$basetexture\" \"vgui/white_additive\" \"$model\" \"1\" \"$translucent\" \"1\" \"$nocull\" \"1\" \"$nofog\" \"1\" \"$ignorez\" \"{}\" \"$additive\" \"{}\" \"$wireframe\" \"{}\" }}",through?1:0,style==1?1:0,style==2?1:0);
+        material=F::Materials.create_from_vmt(name.c_str(),text);
+    }
+    if(!material||material->IsErrorMaterial()) return nullptr;
+    material->ColorModulate(color.r/255.f,color.g/255.f,color.b/255.f);
+    material->AlphaModulate(std::clamp(color.a/255.f*opacity,0.f,1.f));
+    const float white[3]={1,1,1};
+    I::RenderView->SetColorModulation(white);I::RenderView->SetBlend(1.f);
+    I::StudioRender->SetColorModulation(white);I::StudioRender->SetAlphaModulation(1.f);
+    return material;
+}
 void CSandevistan::ShutdownMaterials()
 {
     Reset();
+    for(auto& slots:m_tinted)for(auto& variants:slots)for(auto*& material:variants)if(material){F::Materials.Remove(material);material=nullptr;}
     for(auto& variants:m_materials)for(auto*& material:variants)if(material){F::Materials.Remove(material);material=nullptr;}
 }
 void CSandevistan::RenderWorld(const CViewSetup* setup)
@@ -149,8 +169,15 @@ void CSandevistan::RenderWorld(const CViewSetup* setup)
         std::array<int,Sandevistan::MaxGhosts> order{};int candidates=0;
         for(int i=0;i<m_count;++i)
         {
-            auto* event=FindEvent(m_ghosts[i].event);
-            if(event&&event->confirmed&&TrailFade(now-event->born,m_ghosts[i].rank)>.002f)order[candidates++]=i;
+            auto& ghost=m_ghosts[i];auto* event=FindEvent(ghost.event);
+            if(!event||!event->confirmed) continue;
+            int index=0,total=0;
+            for(int j=0;j<m_count;++j) if(m_ghosts[j].event==ghost.event)
+            {++total;if(m_ghosts[j].command<ghost.command) ++index;}
+            const int copies=std::min(std::clamp(V::Copies.Value,1,Sandevistan::MaxCopies),total);
+            if(Sandevistan::Sample(index,total,copies)<0) continue;
+            ghost.rank=Sandevistan::CapturedRank(index,total);ghost.copies=copies;
+            if(TrailFade(now-event->born,ghost.rank)>.002f)order[candidates++]=i;
         }
         std::sort(order.begin(),order.begin()+candidates,[&](int a,int b)
         {return m_ghosts[a].event==m_ghosts[b].event?m_ghosts[a].command<m_ghosts[b].command:m_ghosts[a].event<m_ghosts[b].event;});
@@ -170,12 +197,9 @@ void CSandevistan::RenderWorld(const CViewSetup* setup)
             if(direction.Length()<1.f){Math::AngleVectors(first->angles,&direction);direction.z=0;}
             const float length=direction.Length();direction=length>0?direction/length:Vec3{1,0,0};
             const float extension=Sandevistan::TrailExtension(ghost.copies,travel,ghost.maxs.x-ghost.mins.x,V::MinSpacing.Value,V::StationarySpread.Value);
-            // Smoothly fan out short/stationary trails; stacking along the
-            // look axis only tints one silhouette in third person.
-            const float fan=V::StationarySpread.Value>0?1.f-std::clamp(travel/std::max(ghost.maxs.x-ghost.mins.x,1.f),0.f,1.f):0.f;
-            Vec3 right;Math::AngleVectors(first->angles,nullptr,&right);
-            m_renderOffset[count]=direction*(-(1.f-ghost.rank)*extension*(1.f-fan))
-                +right*((ghost.rank-.5f)*extension*fan);
+            // Short ground bursts extend behind the same motion/facing axis.
+            // A lateral fan turns every stationary ground event into a left-right sweep.
+            m_renderOffset[count]=direction*Sandevistan::BehindOffset(ghost.rank,extension);
             m_renderGhosts[count]=ghost;m_renderBirth[count]=FindEvent(ghost.event)->born;++count;
         }
     }
@@ -200,6 +224,27 @@ void CSandevistan::RenderWorld(const CViewSetup* setup)
 bool CSandevistan::RenderBody(IVModelRender* render,const DrawModelState_t& state,const ModelRenderInfo_t& info,
                              matrix3x4* bones,DrawModelExecuteFn original)
 {
+    if(m_preview)
+    {
+        auto* local=H::Entities.GetLocal();
+        auto* entity=I::ClientEntityList->GetClientEntity(info.entity_index);
+        if(!local||!entity||!bones||!state.m_pStudioHdr||!state.m_pStudioHWData||!original) return true;
+        auto* base=entity->As<CBaseEntity>();
+        if(base!=local&&(!(base->IsWearable()||base->IsBaseCombatWeapon())||base->m_hOwnerEntity().Get()!=local)) return true;
+        const int count=state.m_pStudioHdr->numbones;
+        if(count<1||count>MAXSTUDIOBONES||m_previewCount>=int(m_previewPackets.size())) return true;
+        auto& packet=m_previewPackets[m_previewCount++];packet.info=info;packet.state=state;memcpy(packet.transform,m_previewTo,sizeof(matrix3x4));
+        Sandevistan::RebaseBones(packet.bones.data(),bones,count,m_previewFrom,m_previewTo);
+        packet.info.origin={m_previewTo[0][3],m_previewTo[1][3],m_previewTo[2][3]};
+        packet.info.angles=m_previewAngles;packet.info.pModelToWorld=&packet.transform;packet.info.pLightingOrigin=&packet.info.origin;
+        packet.state.m_pModelToWorld=&packet.transform;
+        I::ModelRender->ForcedMaterialOverride(m_materials[0][m_previewThroughWalls?1:0]);
+        auto* tint=TintMaterial(Sandevistan::MaxGhosts+64+m_previewCount-1,0,m_previewThroughWalls,m_previewColor,1.f);
+        if(!tint) return true;
+        I::ModelRender->ForcedMaterialOverride(tint);
+        original(render,packet.state,packet.info,packet.bones.data());
+        return true;
+    }
     if(!m_worldPass)return false;
     auto* local=H::Entities.GetLocal();
     if(!local||info.entity_index!=local->entindex()||info.pModel!=local->GetModel())return true;
@@ -246,12 +291,47 @@ bool CSandevistan::RenderBody(IVModelRender* render,const DrawModelState_t& stat
         draw.origin=origin;draw.angles=ghost.angles;draw.skin=ghost.skin;draw.body=ghost.body;draw.hitboxset=ghost.hitbox;
         draw.pModelToWorld=&transform;draw.pLightingOrigin=&draw.origin;setup.m_pModelToWorld=&transform;
         const auto color=Color(ghost.rank);
-        I::RenderView->SetColorModulation(color);
-        I::RenderView->SetBlend(color.a/255.f*std::clamp(V::Opacity.Value,0.f,1.f)*TrailFade(age,ghost.rank));
+        auto* tint=TintMaterial(ghost.materialSlot,V::Material.Value,V::ThroughWalls.Value,color,std::clamp(V::Opacity.Value,0.f,1.f)*TrailFade(age,ghost.rank));
+        if(!tint) continue;
+        I::ModelRender->ForcedMaterialOverride(tint);
         original(render,setup,draw,ghost.bones.data());
         {std::lock_guard lock(m_mutex);++m_diagnostics.drawn;}
     }
     return true; // Never draw the live seed body in first person.
+}
+void CSandevistan::RenderPreview(const Vec3& origin,const Vec3& angles,float scale,Color_t color,bool throughWalls)
+{
+    if(drawing||G::Unload||SDK::CleanScreenshot()||I::EngineVGui->IsGameUIVisible()||!F::Materials.m_bLoaded) return;
+    auto* local=H::Entities.GetLocal();if(!local||!local->IsAlive()) return;
+    CViewSetup view{};
+    const Vec3 mins=origin+local->m_vecMins()*scale,maxs=origin+local->m_vecMaxs()*scale;
+    if(I::Client->GetPlayerView(view)&&Sandevistan::CameraIntersects(view.origin.x,view.origin.y,view.origin.z,
+        mins.x,mins.y,mins.z,maxs.x,maxs.y,maxs.z,4.f)) return;
+    InitializeMaterials();if(!m_materials[0][throughWalls?1:0]) return;
+    const auto hook=U::Hooks.m_mHooks.find("CBaseAnimating_InternalDrawModel");
+    if(hook==U::Hooks.m_mHooks.end()||!hook->second->m_pOriginal) return;
+    Math::AngleMatrix(local->GetAbsAngles(),m_previewFrom);
+    Math::AngleMatrix(angles,m_previewTo);
+    const Vec3 source=local->GetAbsOrigin();
+    scale=std::clamp(scale,.5f,2.f);
+    for(int r=0;r<3;++r)
+    {
+        m_previewFrom[r][3]=source[r];m_previewTo[r][3]=origin[r];
+        for(int c=0;c<3;++c) m_previewTo[r][c]*=scale;
+    }
+    m_previewCount=0;m_previewColor=color;m_previewAngles=angles;m_previewThroughWalls=throughWalls;
+    RenderScope restore;DrawingScope drawingScope;
+    struct Scope {bool& value;Scope(bool& v):value(v){value=true;}~Scope(){value=false;}} preview(m_preview);
+    const auto draw=[&](CBaseEntity* entity) {
+        auto* renderable=entity->GetClientRenderable();if(!renderable) return;
+        if(renderable->GetModelInstance()==MODEL_INSTANCE_INVALID) renderable->CreateModelInstance();
+        I::ModelRender->ForcedMaterialOverride(m_materials[0][throughWalls?1:0]);
+        hook->second->As<InternalDrawModelFn>()(entity->As<CBaseAnimating>(),STUDIO_RENDER|STUDIO_NOSHADOWS);
+    };
+    draw(local);
+    int children=0;
+    for(auto* child=local->FirstMoveChild();child&&children++<64;child=child->NextMovePeer())
+        if((child->IsWearable()||child->IsBaseCombatWeapon())&&!child->IsWearableVM()&&!(child->m_fEffects()&EF_NODRAW)) draw(child);
 }
 void CSandevistan::ReportDiagnostics()
 {
@@ -308,7 +388,9 @@ void CSandevistan::RenderViewmodel(IVModelRender* render,const DrawModelState_t&
         for(int row=0;row<3;++row)transform[row][3]=info.origin[row]+offset[row];
         draw.origin+=offset;draw.pModelToWorld=&transform;setup.m_pModelToWorld=&transform;
         const auto color=Color(rank);
-        I::RenderView->SetColorModulation(color);I::RenderView->SetBlend(color.a/255.f*std::clamp(V::ViewOpacity.Value,0.f,1.f)*TrailFade(now-born,rank));
+        auto* tint=TintMaterial(Sandevistan::MaxGhosts+int(m_nextViewDraw)-1,V::Material.Value,false,color,std::clamp(V::ViewOpacity.Value,0.f,1.f)*TrailFade(now-born,rank));
+        if(!tint) continue;
+        I::ModelRender->ForcedMaterialOverride(tint);
         original(render,setup,draw,packet.bones.data());
     }
 }

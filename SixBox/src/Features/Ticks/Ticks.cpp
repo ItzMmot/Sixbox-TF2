@@ -1,5 +1,6 @@
 #include "Ticks.h"
 #include "../Misc/AutoDodge/AutoDodge.h"
+#include "../Aimbot/AutoStickyJump/AutoStickyJump.h"
 #include "../Aimbot/SpyKnife/KnifePolicy.h"
 #include "../Aimbot/AimbotHitscan/AimbotHitscan.h"
 #include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
@@ -22,10 +23,28 @@ void CTicks::Reset()
 {
 	CancelBurst();
 	m_bKnifeWarp = false;
+    m_bStickyJumpBurst = false;
 	m_bDoubletap = m_bRecharge = m_bWarp = false;
 	m_iShiftedTicks = m_iShiftedGoal = 0;
 }
 
+int CTicks::AvailableStickyJumpTicks() const
+{
+    if(!m_bGoalReached||m_bWarp||m_bDoubletap||m_bRecharge||m_iWait>0||F::AntiCheatCompatibility.Active()) return 0;
+    return std::clamp((std::min)(m_iShiftedTicks,m_iMaxUsrCmdProcessTicks-I::ClientState->chokedcommands-2),0,22);
+}
+bool CTicks::BeginStickyJumpBurst(int extraTicks)
+{
+    if(extraTicks<1||extraTicks>AvailableStickyJumpTicks()) return false;
+    CancelBurst();m_bStickyJumpBurst=m_bDoubletap=true;m_bAntiWarp=false;m_bGoalReached=false;
+    m_iShiftedGoal=m_iShiftedTicks-extraTicks;
+    return true;
+}
+void CTicks::CancelStickyJumpBurst()
+{
+    if(!m_bStickyJumpBurst) return;
+    m_bStickyJumpBurst=m_bDoubletap=m_bAntiWarp=false;m_iShiftedGoal=m_iShiftedTicks;CancelBurst();
+}
 int CTicks::AvailableKnifeWarpTicks() const
 {
 	if(!m_bGoalReached||m_bWarp||m_bDoubletap||m_bRecharge||F::AntiCheatCompatibility.Active()) return 0;
@@ -55,6 +74,7 @@ void CTicks::StopKnifeWarp()
 
 void CTicks::Recharge(CTFPlayer* pLocal)
 {
+    if(F::AutoStickyJump.Busy()) {m_bRecharge=false;return;}
 	if (!m_bGoalReached)
 		return;
 
@@ -85,6 +105,7 @@ void CTicks::Recharge(CTFPlayer* pLocal)
 
 void CTicks::Warp()
 {
+    if(F::AutoStickyJump.Busy()) return;
 	if (!m_bGoalReached)
 		return;
 
@@ -99,7 +120,7 @@ void CTicks::Warp()
 
 void CTicks::Doubletap(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
-	if (F::AutoDodge.Controls(pCmd) || F::AutoTrolldier.IsActive(pCmd))
+	if (F::AutoDodge.Controls(pCmd) || F::AutoTrolldier.IsActive(pCmd) || F::AutoStickyJump.Controls(pCmd))
 		return;
 	if (!m_bGoalReached)
 		return;
@@ -427,6 +448,7 @@ void CTicks::Move(float accumulated_extra_samples, bool bFinalTick)
 			m_iDeficit = 0;
 
 		m_bKnifeWarp = false;
+    m_bStickyJumpBurst = false;
 		m_bDoubletap = m_bWarp = false;
 		CancelBurst();
 	}
@@ -520,7 +542,7 @@ void CTicks::ManagePacket(CUserCmd* pCmd)
 void CTicks::Start(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
 	Vec2 vOriginalMove; int iOriginalButtons;
-	if (m_bPredictAntiwarp = !F::AutoDodge.Controls(pCmd) && (m_bAntiWarp || GetTicks(H::Entities.GetWeapon()) && Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity()))
+	if (m_bPredictAntiwarp = !F::AutoDodge.Controls(pCmd) && !F::AutoStickyJump.Controls(pCmd) && (m_bAntiWarp || GetTicks(H::Entities.GetWeapon()) && Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity()))
 	{
 		vOriginalMove = { pCmd->forwardmove, pCmd->sidemove };
 		iOriginalButtons = pCmd->buttons;
@@ -565,7 +587,7 @@ int CTicks::GetTicks(CTFWeaponBase* pWeapon)
 		return m_iShiftedTicks - m_iShiftedGoal;
 
 	if (!Vars::Doubletap::Doubletap.Value
-		|| m_iWait || m_bWarp || m_bRecharge || F::AutoRocketJump.IsRunning())
+		|| m_iWait || m_bWarp || m_bRecharge || F::AutoRocketJump.IsRunning() || F::AutoStickyJump.Busy())
 		return 0;
 
 	int iTicks = std::min(m_iShiftedTicks + 1, 22);

@@ -28,6 +28,16 @@ int main()
     assert(extension==112&&extension/7>=16);
     assert(TrailExtension(8,200,48,4,4)==0);
     assert(TrailExtension(8,0,48,0,0)==0);
+    for(int i=0;i<8;++i)
+    {
+        const float rank=float(i)/7;
+        assert(BehindOffset(rank,extension)<=0); // ground copies stay behind the player
+        assert(BehindOffset(rank,0)==0); // moving airborne palettes remain unshifted
+        if(i) assert(BehindOffset(rank,extension)>=BehindOffset(float(i-1)/7,extension));
+    }
+    assert(BehindOffset(1,extension)==0);
+    assert(BehindOffset(0,extension)==-extension);
+
     assert(TrailExtension(1,0,48,4,4)==0);
     // Predicting one shot/movement tick ahead must not place a whole body
     // around the first person camera. Test the hull, not only its eye point.
@@ -83,6 +93,17 @@ int main()
     assert(!burst.confirmed&&burst.marked==0);
     assert(burst.Append(200,1,11)&&!burst.confirmed);
     assert(burst.Append(201,0,11.01)&&burst.confirmed&&burst.total==2);
+    // Crit seed command rewrites must not split one physical burst into several gradients.
+    Burst rewritten;rewritten.Start(100,Doubletap);
+    for(int i=0;i<22;++i)
+    {
+        const int wire=i%3==0?50000+i*137:100+i;
+        const int logical=InputSequence(100+i,wire);
+        if(i>0) assert(!rewritten.Split(logical,Doubletap,20+i*.0001));
+        assert(rewritten.Append(logical,21-i,20+i*.0001));
+    }
+    assert(rewritten.marked==22&&rewritten.total==22&&rewritten.confirmed);
+    assert(InputSequence(0,123)==123);
     const Color start(10,250,60,220),end(240,30,180,40);
     auto first=Gradient(start,end,Rank(0,8,2,false));
     auto last=Gradient(start,end,Rank(7,8,2,false));
@@ -91,6 +112,17 @@ int main()
     assert(Gradient(start,end,Rank(0,8,1,true)).r==end.r);
     assert(Gradient(start,end,.5f).a==130);
     assert(Rank(1,3,2,false)<Rank(1,3,1,false));
+    for(int captured=2;captured<=64;++captured)
+    {
+        float prior=-1;
+        for(int index=0;index<captured;++index)
+        {
+            const float rank=CapturedRank(index,captured);assert(rank>prior);prior=rank;
+            const auto color=Gradient(start,end,rank);
+            if(index==0) assert(color.r==start.r);
+            if(index==captured-1) assert(color.r==end.r);
+        }
+    }
     // Every possible burst size: evenly selected copies, no duplicate slots,
     // and both trajectory endpoints even when the renderer draws fewer poses.
     for(int total=1;total<=64;++total)for(int wanted=1;wanted<=MaxCopies;++wanted)

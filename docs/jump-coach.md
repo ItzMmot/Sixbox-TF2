@@ -150,3 +150,7 @@ was added. Regression cases cover alternating strafe phases, marker attenuation,
 slider zero, floor changes and a moving owner with a stationary landing.
 
 Menu placement does not change saved setting keys; existing configurations retain their values.
+
+Auto Sticky Jump shares the world renderer and can enable flight prediction for
+Demoman independently of the main toggle / Soldier-only filter. See
+[Auto Sticky Jump](auto-sticky-jump.md) for its approach, placement and takeoff markers.

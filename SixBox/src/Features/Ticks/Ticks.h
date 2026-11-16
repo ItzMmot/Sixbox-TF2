@@ -33,6 +33,7 @@ private:
 	void CancelBurst();
 
 	bool m_bKnifeWarp = false;
+    bool m_bStickyJumpBurst = false;
 	bool m_bGoalReached = true;
 	Vec3 m_vShootPos = {};
 	std::optional<Vec3> m_vShootAngle = std::nullopt;
@@ -46,7 +47,10 @@ public:
 	void CacheDrawInfo(CTFPlayer* pLocal);
 	void Draw();
 	void Reset();
-	int AvailableKnifeWarpTicks() const;
+	int AvailableStickyJumpTicks() const;
+    bool BeginStickyJumpBurst(int extraTicks);
+    void CancelStickyJumpBurst();
+    int AvailableKnifeWarpTicks() const;
 	bool BeginKnifeWarp(int extraTicks);
 	void StopKnifeWarp();
 	void CancelKnifeAttack();

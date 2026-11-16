@@ -51,6 +51,7 @@
     <ClCompile Include="src\Features\Aimbot\AutoDetonate\AutoDetonate.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoRocketJump\AutoRocketJump.cpp" />
     <ClCompile Include="src\Features\Misc\AutoDodge\AutoDodge.cpp" />
+    <ClCompile Include="src\Features\Aimbot\AutoStickyJump\AutoStickyJump.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoTrolldier\AutoTrolldier.cpp" />
     <ClCompile Include="src\Features\ImGui\TextEffects\TextEffects.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoHeal\AutoHeal.cpp" />
@@ -481,6 +482,8 @@
     <ClInclude Include="src\Features\Aimbot\AutoAirblast\AutoAirblast.h" />
     <ClInclude Include="src\Features\Aimbot\AutoDetonate\AutoDetonate.h" />
     <ClInclude Include="src\Features\Aimbot\AutoRocketJump\AutoRocketJump.h" />
+    <ClInclude Include="src\Features\Aimbot\AutoStickyJump\AutoStickyJump.h" />
+    <ClInclude Include="src\Features\Aimbot\AutoStickyJump\StickyJumpPolicy.h" />
     <ClInclude Include="src\Features\Aimbot\AutoRocketJump\JumpPolicy.h" />
     <ClInclude Include="src\Features\Misc\AutoDodge\AutoDodge.h" />
     <ClInclude Include="src\Features\Misc\AutoDodge\DodgePolicy.h" />
