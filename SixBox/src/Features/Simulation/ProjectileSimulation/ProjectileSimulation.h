@@ -90,6 +90,9 @@ public:
 	void RunTick(ProjectileInfo& tProjInfo, bool bPath = true);
 	Vec3 GetOrigin();
 	Vec3 GetVelocity();
+	// Continue a world projectile after a traced bounce without resetting drag
+	// or angular velocity. Used by the isolated AutoDodge simulation instance.
+	void SetState(const Vec3& origin, const Vec3& velocity);
 	float GetDesync();
 
 	inline std::pair<CTFWeaponBase*, CTFPlayer*> GetEntities(CBaseEntity* pProjectile)
@@ -240,6 +243,7 @@ public:
 	const SpecialProjectile_t* m_pSpecial = nullptr;
 
 	IPhysicsEnvironment* m_pEnv = nullptr;
+	CPhysCollide* m_pBoxCollide = nullptr;
 
 	IPhysicsObject* m_pObj = nullptr;
 	IPhysicsObject* m_pObjBox = nullptr;

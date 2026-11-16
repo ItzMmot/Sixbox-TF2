@@ -1,6 +1,7 @@
 #pragma once
 #include "../../../SDK/SDK.h"
 #include <functional>
+#include <array>
 
 Enum(Move, Ground, Air, Swim)
 
@@ -86,3 +87,32 @@ public:
 };
 
 ADD_FEATURE(CMovementSimulation, MoveSim);
+
+// Exact, command-driven local probes. Unlike opponent extrapolation this does
+// not average velocity, clear duck timers, predict strafes or force bunnyhop.
+// A scope may start from EnginePrediction's pre-command snapshot; destruction
+// always restores the caller's (possibly already predicted) state.
+class CScopedLocalMovement
+{
+	CTFPlayer* m_player;
+	datamap_t* m_map;
+	std::vector<byte> m_saved, m_base;
+	std::array<byte, sizeof(CTFGameMovement)> m_movement;
+	std::array<byte, sizeof(CTFGameMovement)> m_baseMovement;
+	CGlobalVarsBase m_clock;
+	CUserCmd* m_oldCommand;
+	CUserCmd m_command;
+	CMoveData m_move = {};
+	Vec3 m_absolute, m_velocity, m_angles;
+	bool m_inPrediction, m_first, m_valid = false;
+	int m_buttons = 0, m_tick = 0, m_baseTick = 0;
+public:
+	CScopedLocalMovement(CTFPlayer* player, bool predictionBase);
+	~CScopedLocalMovement();
+	CScopedLocalMovement(const CScopedLocalMovement&) = delete;
+	CScopedLocalMovement& operator=(const CScopedLocalMovement&) = delete;
+	bool Valid() const { return m_valid; }
+	void Checkpoint();
+	void Rewind();
+	bool Step(const CUserCmd& command);
+};

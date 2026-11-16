@@ -1,4 +1,5 @@
 #include "SpyKnife.h"
+#include "../../Misc/AutoDodge/AutoDodge.h"
 #include "../Aimbot.h"
 #include "../AutoTrolldier/AutoTrolldier.h"
 #include "../../Ticks/Ticks.h"
@@ -66,7 +67,7 @@ namespace
 
 bool CSpyKnife::Eligible(CTFPlayer* local,CTFWeaponBase* weapon) const
 {
-    return local&&weapon&&local->IsAlive()&&!local->IsAGhost()&&local->m_iClass()==TF_CLASS_SPY
+	return !F::AutoDodge.Controls(G::CurrentUserCmd)&&local&&weapon&&local->IsAlive()&&!local->IsAGhost()&&local->m_iClass()==TF_CLASS_SPY
         &&weapon->GetWeaponID()==TF_WEAPON_KNIFE&&weapon->As<CTFKnife>()->m_bKnifeExists()
         &&Vars::Aimbot::General::AimType.Value&&Vars::Aimbot::General::AutoShoot.Value
         &&Vars::Aimbot::Melee::KnifePrecision.Value&&Vars::Aimbot::Melee::AutoBackstab.Value

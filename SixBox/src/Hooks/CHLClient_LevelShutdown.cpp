@@ -1,4 +1,5 @@
 #include "../SDK/SDK.h"
+#include "../Features/Misc/AutoDodge/AutoDodge.h"
 #include "../Features/Aimbot/SpyKnife/SpyKnife.h"
 #include "../Features/Aimbot/AutoTrolldier/AutoTrolldier.h"
 #include "../Features/Aimbot/AutoRocketJump/AutoRocketJump.h"
@@ -24,6 +25,7 @@ MAKE_HOOK(CHLClient_LevelShutdown, U::Memory.GetVirtual(I::Client, 7), void,
 {
 	DEBUG_RETURN(CHLClient_LevelShutdown, rcx);
 
+	F::AutoDodge.Unload();
 	F::SpyKnife.Reset(true);
 	F::AutoRocketJump.Reset();
 	F::AutoTrolldier.Reset();

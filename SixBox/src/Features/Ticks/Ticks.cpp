@@ -1,4 +1,5 @@
 #include "Ticks.h"
+#include "../Misc/AutoDodge/AutoDodge.h"
 #include "../Aimbot/SpyKnife/KnifePolicy.h"
 #include "../Aimbot/AimbotHitscan/AimbotHitscan.h"
 #include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
@@ -98,7 +99,7 @@ void CTicks::Warp()
 
 void CTicks::Doubletap(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
-	if (F::AutoTrolldier.IsActive(pCmd))
+	if (F::AutoDodge.Controls(pCmd) || F::AutoTrolldier.IsActive(pCmd))
 		return;
 	if (!m_bGoalReached)
 		return;
@@ -519,7 +520,7 @@ void CTicks::ManagePacket(CUserCmd* pCmd)
 void CTicks::Start(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
 	Vec2 vOriginalMove; int iOriginalButtons;
-	if (m_bPredictAntiwarp = m_bAntiWarp || GetTicks(H::Entities.GetWeapon()) && Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity())
+	if (m_bPredictAntiwarp = !F::AutoDodge.Controls(pCmd) && (m_bAntiWarp || GetTicks(H::Entities.GetWeapon()) && Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity()))
 	{
 		vOriginalMove = { pCmd->forwardmove, pCmd->sidemove };
 		iOriginalButtons = pCmd->buttons;
@@ -559,6 +560,7 @@ bool CTicks::CanChoke(bool bCanShift)
 
 int CTicks::GetTicks(CTFWeaponBase* pWeapon)
 {
+	if (F::AutoDodge.Controls(G::CurrentUserCmd)) return 0;
 	if (m_bDoubletap && m_iShiftedGoal < m_iShiftedTicks)
 		return m_iShiftedTicks - m_iShiftedGoal;
 

@@ -3,6 +3,103 @@
 #include "../../EnginePrediction/EnginePrediction.h"
 #include "../../Aimbot/AimbotProjectile/ProjProfiler.h"
 #include <numeric>
+#include <cstring>
+
+CScopedLocalMovement::CScopedLocalMovement(CTFPlayer* player, bool predictionBase) :
+	m_player(player), m_map(player->GetPredDescMap()), m_clock(*I::GlobalVars),
+	m_oldCommand(player->m_pCurrentCommand()), m_absolute(player->GetAbsOrigin()),
+	m_velocity(player->GetAbsVelocity()), m_inPrediction(I::Prediction->m_bInPrediction),
+	m_first(I::Prediction->m_bFirstTimePredicted)
+{
+	I::Prediction->GetLocalViewAngles(m_angles);
+	std::memcpy(m_movement.data(), I::GameMovement, m_movement.size());
+	m_baseMovement = m_movement;
+	const size_t size = player->GetIntermediateDataSize();
+	if (!m_map || !size || size > 1024 * 1024) return;
+	m_saved.resize(size); m_base.resize(size);
+	CPredictionCopy save = { PC_EVERYTHING, m_saved.data(), PC_DATA_PACKED, player, PC_DATA_NORMAL };
+	save.TransferData("LocalCommandSave", player->entindex(), m_map);
+	if (predictionBase && !F::EnginePrediction.RestoreSimulationBase(player)) return;
+	player->SetAbsOrigin(player->m_vecOrigin());
+	CPredictionCopy base = { PC_EVERYTHING, m_base.data(), PC_DATA_PACKED, player, PC_DATA_NORMAL };
+	base.TransferData("LocalCommandBase", player->entindex(), m_map);
+	m_baseTick = player->m_nTickBase();
+	m_valid = true;
+	Rewind();
+}
+
+CScopedLocalMovement::~CScopedLocalMovement()
+{
+	if (!m_saved.empty())
+	{
+		CPredictionCopy restore = { PC_EVERYTHING, m_player, PC_DATA_NORMAL, m_saved.data(), PC_DATA_PACKED };
+		restore.TransferData("LocalCommandRestore", m_player->entindex(), m_map);
+		m_player->SetAbsOrigin(m_absolute);
+		m_player->SetAbsVelocity(m_velocity);
+	}
+	m_player->m_pCurrentCommand() = m_oldCommand;
+	// Probes never nest inside ProcessMovement; its helper host is null between
+	// commands (the same invariant used by EnginePrediction::Simulate).
+	I::MoveHelper->SetHost(nullptr);
+	*I::GlobalVars = m_clock;
+	I::Prediction->m_bInPrediction = m_inPrediction;
+	I::Prediction->m_bFirstTimePredicted = m_first;
+	I::Prediction->SetLocalViewAngles(m_angles);
+	// Include movement caches, stuck-check timestamps and scratch pointers.
+	// Leave the engine-owned vtable untouched.
+	std::memcpy(reinterpret_cast<byte*>(I::GameMovement) + sizeof(void*),
+		m_movement.data() + sizeof(void*), m_movement.size() - sizeof(void*));
+}
+
+void CScopedLocalMovement::Checkpoint()
+{
+	if (!m_valid) return;
+	CPredictionCopy save = { PC_EVERYTHING, m_base.data(), PC_DATA_PACKED, m_player, PC_DATA_NORMAL };
+	save.TransferData("LocalCommandCheckpoint", m_player->entindex(), m_map);
+	std::memcpy(m_baseMovement.data(), I::GameMovement, m_baseMovement.size());
+	m_baseTick += m_tick;
+	m_tick = 0;
+}
+
+void CScopedLocalMovement::Rewind()
+{
+	if (!m_valid) return;
+	CPredictionCopy restore = { PC_EVERYTHING, m_player, PC_DATA_NORMAL, m_base.data(), PC_DATA_PACKED };
+	restore.TransferData("LocalCommandRewind", m_player->entindex(), m_map);
+	m_player->SetAbsOrigin(m_player->m_vecOrigin());
+	m_player->SetAbsVelocity(m_player->m_vecVelocity());
+	std::memcpy(reinterpret_cast<byte*>(I::GameMovement) + sizeof(void*),
+		m_baseMovement.data() + sizeof(void*), m_baseMovement.size() - sizeof(void*));
+	m_buttons = m_player->m_nButtons();
+	m_tick = 0;
+	m_move = {};
+}
+
+bool CScopedLocalMovement::Step(const CUserCmd& command)
+{
+	if (!m_valid) return false;
+	m_command = command;
+	m_command.buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_ATTACK3);
+	m_command.weaponselect = 0; m_command.impulse = 0;
+	m_player->m_pCurrentCommand() = &m_command;
+	I::GlobalVars->tickcount = m_baseTick + m_tick++;
+	I::GlobalVars->curtime = TICKS_TO_TIME(I::GlobalVars->tickcount);
+	I::GlobalVars->frametime = TICK_INTERVAL;
+	I::Prediction->m_bInPrediction = true;
+	I::Prediction->m_bFirstTimePredicted = false;
+	I::MoveHelper->SetHost(m_player);
+	I::Prediction->SetupMove(m_player, &m_command, I::MoveHelper, &m_move);
+	m_move.m_nOldButtons = m_buttons;
+	I::GameMovement->ProcessMovement(m_player, &m_move);
+	I::Prediction->FinishMove(m_player, &m_command, &m_move);
+	m_buttons = m_command.buttons;
+	m_player->m_nButtons() = m_buttons;
+	m_player->m_afButtonLast() = m_buttons;
+	I::MoveHelper->SetHost(nullptr);
+	const Vec3& pos = m_player->m_vecOrigin();
+	return std::isfinite(pos.x) && std::isfinite(pos.y) && std::isfinite(pos.z)
+		&& std::isfinite(m_player->m_vecVelocity().LengthSqr());
+}
 
 bool CMovementSimulation::Store(MoveStorage& tMoveStorage)
 {

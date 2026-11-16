@@ -1252,6 +1252,18 @@ static void MiscMain()
 		FDropdown(AutoEdgebug, FDropdownEnum::None, -28);
 		FColorPicker(Vars::Colors::EdgebugPath);
 
+		Subheader("Auto dodge");
+		FToggle(AutoDodge::Enabled);
+		PushTransparent(!AutoDodge::Enabled.Value);
+		FSlider(AutoDodge::PredictionTime);
+		FSlider(AutoDodge::CalculationBudget);
+		FSlider(AutoDodge::SafetyMargin);
+		FToggle(AutoDodge::Jump);
+		FToggle(AutoDodge::Duck);
+		FToggle(AutoDodge::AvoidStickies);
+		FNote("Prioritizes imminent impacts and splash. The calculation budget reserves movement time; a minimum escape comparison may exceed it. Suspended during tick shifts and warp.");
+		PopTransparent();
+
 		Subheader("Jumping");
 		FToggle(Bunnyhop);
 		FToggle(EdgeJump);

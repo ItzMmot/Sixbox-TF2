@@ -1,4 +1,5 @@
 #include "AutoRocketJump.h"
+#include "../../Misc/AutoDodge/AutoDodge.h"
 #include "../AimbotProjectile/ProjProfiler.h"
 
 #include "../../Simulation/ProjectileSimulation/ProjectileSimulation.h"
@@ -65,7 +66,7 @@ void CAutoRocketJump::Prepare(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 
 bool CAutoRocketJump::ShouldRun(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
-	if (!pLocal || !pCmd || !I::GlobalVars || !pLocal->IsAlive() || pLocal->IsAGhost()
+	if (F::AutoDodge.Controls(pCmd) || !pLocal || !pCmd || !I::GlobalVars || !pLocal->IsAlive() || pLocal->IsAGhost()
 		|| !pLocal->CanAttack() || pLocal->IsSwimming() || pLocal->m_MoveType() != MOVETYPE_WALK
 		|| (!Vars::Misc::Movement::AutoRocketJump.Value && !Vars::Misc::Movement::AutoCTap.Value)
 		|| !RocketLauncher(pWeapon)

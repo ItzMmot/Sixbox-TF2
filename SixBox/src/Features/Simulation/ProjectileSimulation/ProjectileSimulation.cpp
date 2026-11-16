@@ -602,10 +602,13 @@ bool CProjectileSimulation::Initialize(ProjectileInfo& tProjInfo, bool bSimulate
 
 	if (!m_pEnv)
 		m_pEnv = I::Physics->CreateEnvironment();
+	if (!m_pEnv) return false;
 
 	if (!m_pObjBox)
 	{
-		CPhysCollide* pCollide = I::PhysicsCollision->BBoxToCollide({ -2.f, -2.f, -2.f }, { 2.f, 2.f, 2.f });
+		if (!m_pBoxCollide)
+			m_pBoxCollide = I::PhysicsCollision->BBoxToCollide({ -2.f, -2.f, -2.f }, { 2.f, 2.f, 2.f });
+		if (!m_pBoxCollide) return false;
 		objectparams_t tParams = m_tPhysDefaultObjectParams;
 		tParams.damping = 0.f;
 		tParams.rotdamping = 0.f;
@@ -613,7 +616,7 @@ bool CProjectileSimulation::Initialize(ProjectileInfo& tProjInfo, bool bSimulate
 		tParams.rotInertiaLimit = 0.f;
 		tParams.enableCollisions = false;
 
-		m_pObjBox = m_pEnv->CreatePolyObject(pCollide, 0, tProjInfo.m_vPos, tProjInfo.m_vAng, &tParams);
+		m_pObjBox = m_pEnv->CreatePolyObject(m_pBoxCollide, 0, tProjInfo.m_vPos, tProjInfo.m_vAng, &tParams);
 	}
 
 	bool bSpecialObject = false;
@@ -952,6 +955,15 @@ Vec3 CProjectileSimulation::GetVelocity()
 
 	Vec3 vOut; m_pObj->GetVelocity(&vOut, nullptr);
 	return vOut;
+}
+
+void CProjectileSimulation::SetState(const Vec3& origin, const Vec3& velocity)
+{
+	if (!m_bPhysics) { m_tObj = {origin, velocity}; return; }
+	if (!m_pObj) return;
+	Vec3 angle; m_pObj->GetPosition(nullptr, &angle);
+	m_pObj->SetPosition(origin, angle, true);
+	m_pObj->SetVelocity(&velocity, nullptr);
 }
 
 float CProjectileSimulation::GetDesync()

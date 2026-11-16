@@ -1008,6 +1008,15 @@ NAMESPACE_BEGIN(Vars)
 	NAMESPACE_BEGIN(Misc)
 
 		NAMESPACE_BEGIN(Movement)
+			NAMESPACE_BEGIN(AutoDodge)
+				CVar(Enabled, VA_LIST("Auto dodge", "Auto dodge enabled"), false);
+				CVar(PredictionTime, "Dodge prediction time", .8f, SLIDER_CLAMP | SLIDER_PRECISION, .2f, 1.5f, .05f, "%gs");
+				CVar(CalculationBudget, "Dodge calculation budget", 4.f, SLIDER_CLAMP | SLIDER_PRECISION, 1.f, 16.f, .5f, "%g ms");
+				CVar(SafetyMargin, "Dodge safety margin", 48.f, SLIDER_CLAMP, 0.f, 128.f, 4.f, "%g HU");
+				CVar(Jump, "Dodge jumping", true);
+				CVar(Duck, "Dodge crouching", true);
+				CVar(AvoidStickies, "Dodge placed stickies", true);
+			NAMESPACE_END(AutoDodge)
 			CVarEnum(AutoStrafe, "Auto strafe", 0, NONE, nullptr,
 				VA_LIST("Off", "Legit", "Directional"),
 				Off, Legit, Directional);

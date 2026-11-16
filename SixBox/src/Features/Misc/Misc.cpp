@@ -1,5 +1,6 @@
 #include "../Aimbot/SpyKnife/SpyKnife.h"
 #include "Misc.h"
+#include "AutoDodge/AutoDodge.h"
 #include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
 #include "../Configs/Configs.h"
 #include "AutoItem/AutoItem.h"
@@ -63,7 +64,7 @@ void CMisc::RunPre(CTFPlayer* pLocal, CUserCmd* pCmd)
 void CMisc::RunPost(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
 	m_bDuckSpeedActive = false;
-	if (F::AutoTrolldier.IsActive(pCmd)||F::SpyKnife.Controls(pCmd))
+	if (F::AutoDodge.Controls(pCmd)||F::AutoTrolldier.IsActive(pCmd)||F::SpyKnife.Controls(pCmd))
 		return;
 	AutoCrouchNavbot(pLocal, pCmd);
 

@@ -1,4 +1,5 @@
 #include "AutoTrolldier.h"
+#include "../../Misc/AutoDodge/AutoDodge.h"
 #include "../AimbotGlobal/AimbotGlobal.h"
 #include "../../Backtrack/Backtrack.h"
 #include "../../Ticks/Ticks.h"
@@ -30,7 +31,7 @@ namespace
 
 bool CAutoTrolldier::Eligible(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd) const
 {
-	if (!Vars::Misc::Movement::AutoTrolldier::Enabled.Value || !pLocal || !pWeapon || !pCmd || !I::GlobalVars
+	if (F::AutoDodge.Controls(pCmd) || !Vars::Misc::Movement::AutoTrolldier::Enabled.Value || !pLocal || !pWeapon || !pCmd || !I::GlobalVars
 		|| I::EngineClient->IsPlayingDemo() || I::ClientState->IsPaused() || pCmd->weaponselect
 		|| !pLocal->IsAlive() || pLocal->m_iClass() != TF_CLASS_SOLDIER || !pLocal->CanAttack()
 		|| pLocal->IsAGhost() || pLocal->IsTaunting() || pLocal->IsSwimming() || pLocal->m_MoveType() != MOVETYPE_WALK
@@ -129,6 +130,7 @@ int CAutoTrolldier::AutomaticAimType() const
 
 void CAutoTrolldier::UpdateAutomation(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
+	if (F::AutoDodge.Controls(pCmd)) { Reset(); return; }
 	using namespace Vars::Misc::Movement::AutoTrolldier;
 	if (!Enabled.Value || !AutoMarketGardenerSwap.Value || !pLocal || !pWeapon || !pCmd
 		|| !pLocal->IsAlive() || pLocal->m_iClass() != TF_CLASS_SOLDIER || !I::GlobalVars
