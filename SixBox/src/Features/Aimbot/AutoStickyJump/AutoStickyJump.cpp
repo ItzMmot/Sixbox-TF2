@@ -45,8 +45,9 @@ void CAutoStickyJump::Publish(float remaining,const char* status)
             std::ofstream log(path,(!error&&bytes>1024*1024)?std::ios::trunc:std::ios::app);
             auto* local=m_owner.Get();auto* weapon=m_weapon.Get();
             if(log&&local&&weapon)
-                log<<"v4 cmd="<<G::OriginalCmd.command_number<<" time="<<Time(local)<<" phase="<<int(m_phase)
+                log<<"v5 cmd="<<G::OriginalCmd.command_number<<" time="<<Time(local)<<" phase="<<int(m_phase)
                    <<" status="<<m_plan.status<<" count="<<m_plan.count<<'/'<<m_plan.wanted<<" sent="<<m_released
+                   <<" weapon="<<weapon->m_iItemDefinitionIndex()<<" native_count="<<weapon->As<CTFPipebombLauncher>()->m_iPipebombCount()
                    <<" attached="<<m_diagnostics.attached<<" armed="<<m_diagnostics.armed<<" clear="<<m_diagnostics.clear
                    <<" ground="<<local->IsOnGround()<<" secondary="<<weapon->CanSecondaryAttack()
                    <<" next_secondary="<<weapon->m_flNextSecondaryAttack()<<" owner_next_attack="<<local->m_flNextAttack()
@@ -309,7 +310,9 @@ void CAutoStickyJump::Prepare(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* c
         if(now-m_lastSearch>=.15f) {m_lastSearch=now;Plan(local,weapon,cmd);}
         if(m_phase==Phase::Plan) {Publish(0,"No clear launch route / shot");Finalize(local,cmd);return;}
     }
-    if(now<m_started||now-m_started>10.f) {Stage(Phase::Failed,now);Publish(0,"Timed out - toggle to retry");Finalize(local,cmd);return;}
+    // Tickbase correction at the start of a charged burst can rewind the owner
+    // clock. Let it catch up; command regression and respawn are handled above.
+    if(now-m_started>10.f) {Stage(Phase::Failed,now);Publish(0,"Timed out - toggle to retry");Finalize(local,cmd);return;}
     int seen=0;bool settled=true,armed=true,clear=true;float remaining=0,minRadius=FLT_MAX;Vec3 centre;
     const float duration=ArmTime(local,weapon);
     m_diagnostics.rawSpeed=0;
@@ -317,7 +320,7 @@ void CAutoStickyJump::Prepare(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* c
     {
         auto* sticky=entity->As<CTFGrenadePipebombProjectile>();
         if(sticky->m_hOriginalLauncher().Get()!=weapon||m_baseline.contains(entity->GetRefEHandle().ToInt())) continue;
-        if(sticky->m_iType()!=TF_GL_MODE_REMOTE_DETONATE) continue;
+        if(!sticky->HasStickyEffects()) continue;
         ++seen;centre+=sticky->m_vecOrigin();
         // The authoritative attachment flag freezes VPhysics. Network velocity
         // can retain the old launch value and must not block a stuck bomb.
@@ -353,7 +356,8 @@ void CAutoStickyJump::Prepare(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* c
             if(validate||m_aimOrigin.DistToSqr(local->GetShootPos())>1.f)
             {
                 if(!Shot(local,weapon,m_plan.blast,aim,validate?&m_plan:nullptr,validate)) {Stage(Phase::Failed,now);Publish(0,"Sticky shot became obstructed");Finalize(local,cmd);return;}
-                if(validate) m_lastShotCheck=now;m_aimOrigin=local->GetShootPos();m_angles=aim;
+                if(validate) m_lastShotCheck=now;
+                m_aimOrigin=local->GetShootPos();m_angles=aim;
             }
             const bool aligned=Rotate(cmd,aim);
             if(m_chargeCommand>=0)
@@ -394,7 +398,8 @@ void CAutoStickyJump::Prepare(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* c
             if(adjustment.Length2D()>48.f||std::abs(adjustment.z)>24.f) Stage(Phase::Failed,now);
             else {m_plan.takeoff+=Vec3(adjustment.x,adjustment.y,0);m_plan.blast=centre;Stage(Phase::Approach,now);}
         }
-        else if(now-m_lastRelease>3.f) Stage(Phase::Failed,now);
+        else if(now-m_lastRelease>3.f)
+        {Stage(Phase::Failed,now);m_reason=seen<wanted?"Sticky not observed - toggle to retry":"Sticky did not attach - toggle to retry";}
     }
     if(AutoWalk.Value&&m_plan.valid) m_worldMove=m_plan.wish*450.f;
     if(m_phase==Phase::Approach)

@@ -2,6 +2,8 @@
 
 **Misc → Main → Movement → Auto sticky jump**. Hold a sticky launcher as Demoman,
 stand on clear ground, then enable the module (a toggle bind is recommended).
+Both ordinary sticky launchers and the Sticky Jumper are supported, including
+the Jumper's separate practice-projectile type.
 The module does not start/control commands while ClickGUI or the game menu is open;
 opening a menu cancels the current sequence.
 Auto walk picks up the current velocity direction, falling back to movement input
@@ -22,6 +24,8 @@ The default is one jump per activation; disable/re-enable to plan another.
   recharge automatically. Server packet limits and the weapon's real cooldown
   apply: both shots fit in one burst only when enough commands are available;
   otherwise the charged commands shorten the interval and the second shot waits.
+  Prediction's tickbase rewind at burst startup does not cancel the sequence;
+  weapon cooldown and arm checks still use the owner's current game time.
 - **Flush first** detonates old stickies before planning, waits for their removal
   in both the entity list and launcher count, and handles directional Scottish
   Resistance detonation. It takes priority over Preserve existing traps.
@@ -77,6 +81,11 @@ inflict substantially more self damage than one.
 `tests/auto_sticky_jump_test.cpp` covers arm-time attributes/runes, real release
 edges, packet budgets, momentum lead, stale-charge/cooldown gates, contact gates and detonation windows. Native
 MSVC GUI/Textmode checks cover the adapter and command/render integration.
+`python3 tests/auto_sticky_jump_controller_test.py` runs the production command
+controller and entity-cache predicate with a fake engine: stock/practice bombs,
+one/two shots, both jump modes, all rotations, manual/automatic walking, flushing,
+and a backward clock step at doubletap startup. Shot/route planning and
+diagnostic file output are stubbed; jump and detonation buttons are checked.
 In-game timing and live server behavior require gameplay testing.
 
 ## Diagnostics
@@ -86,4 +95,6 @@ attachment, arm readiness, line of sight, raw projectile velocity/timestamp and
 current/future blast scores. It is local, bounded to roughly 1 MiB and written
 on state changes and at most ten times per second near the takeoff window.
 It also records the generic secondary-attack clock for diagnosing reload-related
-failures; that clock does not gate sticky detonation.
+failures; that clock does not gate sticky detonation. Version 5 also records the
+weapon definition index and native launcher bomb count to expose discrepancies
+between the launcher and observed projectile list.

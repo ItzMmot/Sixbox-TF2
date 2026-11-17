@@ -337,7 +337,7 @@ void CEntities::Store()
 					if (nClassID == ETFClassID::CTFGrenadePipebombProjectile)
 					{
 						auto pPipebomb = pEntity->As<CTFGrenadePipebombProjectile>();
-						if (pPipebomb->m_hThrower().GetEntryIndex() == nLocalIndex && pPipebomb->m_iType() == TF_GL_MODE_REMOTE_DETONATE)
+						if (pPipebomb->m_hThrower().GetEntryIndex() == nLocalIndex && pPipebomb->HasStickyEffects())
 							m_aGroups[EntityEnum::LocalStickies].push_back(pEntity);
 					}
 					else if (nClassID == ETFClassID::CTFProjectile_Flare && pEntity->m_hOwnerEntity().GetEntryIndex() == nLocalIndex)
