@@ -3,7 +3,7 @@
 #include <array>
 #include <vector>
 
-namespace StickyControl
+namespace StickyJump
 {
     enum class Phase { Idle, Search, Validate, Approach, Launch, Verify };
     struct Frame

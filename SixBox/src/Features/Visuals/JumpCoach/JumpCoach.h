@@ -41,8 +41,6 @@ class CJumpCoach
     float m_takeoffSpeed=0,m_peakSpeed=0,m_airStart=0,m_lastGroundSpeed=0,m_efficiency=0;
     bool m_airborne=false;
     static JumpCoach::Trace Trace(void* context,JumpCoach::Vector from,JumpCoach::Vector to,JumpCoach::Vector mins,JumpCoach::Vector maxs);
-    void RenderStickyPlan();
-    void DrawStickyHUD();
     void RocketAdvice(CTFPlayer* local,CTFWeaponBase* weapon,const CUserCmd* cmd,const JumpCoach::Body& body,Display& display);
 public:
     void Update(CTFPlayer* local,CTFWeaponBase* weapon,const CUserCmd* cmd);

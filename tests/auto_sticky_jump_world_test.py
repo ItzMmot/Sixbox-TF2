@@ -59,7 +59,7 @@ float floorSlope=0, floorEnd=1e9f;
 namespace SDK {
     float GetGravity(){return 800;}
     void FixMovement(CUserCmd* command,const Vec3& angles){
-        const float old=command->viewangles.y*StickyControl::Pi/180,newYaw=angles.y*StickyControl::Pi/180;
+        const float old=command->viewangles.y*StickyJump::Pi/180,newYaw=angles.y*StickyJump::Pi/180;
         const float x=command->forwardmove*std::cos(old)+command->sidemove*std::sin(old);
         const float y=command->forwardmove*std::sin(old)-command->sidemove*std::cos(old);
         command->forwardmove=x*std::cos(newYaw)+y*std::sin(newYaw);
@@ -91,7 +91,7 @@ struct CProjectileSimulation {
     Vec3 origin,velocity;
     bool GetInfo(CTFPlayer* player,CTFPlayer*,Vec3 angles,ProjectileInfo& info,int,float){
         lastShotOrigin=player->m_vecOrigin();lastShotVelocity=player->m_vecVelocity();
-        const float pitch=angles.x*StickyControl::Pi/180,yaw=angles.y*StickyControl::Pi/180;
+        const float pitch=angles.x*StickyJump::Pi/180,yaw=angles.y*StickyJump::Pi/180;
         info.origin=player->m_vecOrigin()+Vec3{0,0,50};
         info.m_vPos=info.origin;
         const float horizontal=900*std::cos(pitch)+200*std::sin(pitch);
@@ -105,7 +105,7 @@ struct CProjectileSimulation {
     void SetupTrace(CTraceFilterCollideable&,int&,CTFPlayer*){}
 };
 void DestroySimulation(CProjectileSimulation&){}
-using namespace StickyControl;
+using namespace StickyJump;
 Vec V(Vec3 v){return {v.x,v.y,v.z};}Vec3 E(Vec v){return {v.x,v.y,v.z};}
 uint32_t Identity(CTFPlayer* entity){return entity->id;}
 float Convar(const char*,float fallback){return fallback;}
@@ -248,7 +248,7 @@ int main(){
         actual.Bind(&player,&weapon,raw);frame.body=ReadBody(&player);frame.grounded=false;frame.bombs=actual.Bombs();
         assert(!controller.Run(frame,requested,actual).controls&&!controller.Busy());
     }
-    std::cout<<"Sticky Jump Control: production detonation assist world checks passed\n";
+    std::cout<<"Auto Sticky Jump: production detonation assist world checks passed\n";
 }
 '''
 
@@ -268,17 +268,17 @@ float LengthSqr() const''')
     movement = (MOVEMENT / 'MovementSimulation.cpp').read_text()
     implementation = movement[movement.index('CScopedLocalMovement::Snapshot CScopedLocalMovement::Capture('):
                               movement.index('bool CMovementSimulation::Store(')]
-    source = (ROOT / 'SixBox/src/Features/Misc/StickyJumpControl/StickyJumpControl.cpp').read_text()
+    source = (ROOT / 'SixBox/src/Features/Aimbot/AutoStickyJump/AutoStickyJump.cpp').read_text()
     body_reader = source[source.index('    Body ReadBody('):source.index('    uint32_t Identity(')]
     detonator = source[source.index('    bool DetonatorAvailable('):source.index('    void DestroySimulation(')]
     adapter = source[source.index('class CStickyJumpWorld\n'):
-                     source.index('CStickyJumpControl::CStickyJumpControl()')]
+                     source.index('CAutoStickyJump::CAutoStickyJump()')]
     start = source.index('    m_intent=G::OriginalCmd;')
     composition = source[start:source.index('    Apply(local,command);', start)]
     composition = composition.replace('m_intent=G::OriginalCmd;', 'CUserCmd m_intent=raw;', 1)
     composition = ('CUserCmd Compose(const Output& output,const CUserCmd& raw){\n'
                    + composition + '\nreturn m_intent;\n}\n')
-    include = '#include "' + str(ROOT / 'SixBox/src/Features/Misc/StickyJumpControl/JumpController.h') + '"\n'
+    include = '#include "' + str(ROOT / 'SixBox/src/Features/Aimbot/AutoStickyJump/JumpController.h') + '"\n'
     return include + stub + declaration + implementation + ADAPTER + body_reader + detonator + adapter + composition
 
 

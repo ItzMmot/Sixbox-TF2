@@ -4,7 +4,7 @@
 #include <cstdint>
 
 // All velocities are HU/s and angles are degrees.
-namespace StickyControl
+namespace StickyJump
 {
     constexpr float Pi = 3.14159265358979323846f;
     struct Vec

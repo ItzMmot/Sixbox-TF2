@@ -22,8 +22,8 @@ jobs:
           python3 tests/inventory_wearables_test.py
           python3 tests/karaoke_bridge_test.py
           python3 tests/karaoke_audio_test.py
-      - name: Validate sticky jump command controller
-        run: python3 tests/auto_sticky_jump_controller_test.py
+      - name: Validate Auto Sticky Jump world adapter
+        run: python3 tests/auto_sticky_jump_world_test.py
       - name: Validate aimbot policies and command schedules
         shell: bash
         run: |

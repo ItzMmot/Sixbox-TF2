@@ -1,5 +1,5 @@
 #include "PacketManip.h"
-#include "../Misc/StickyJumpControl/StickyJumpControl.h"
+#include "../Aimbot/AutoStickyJump/AutoStickyJump.h"
 
 #include "../Visuals/FakeAngle/FakeAngle.h"
 #include "../Ticks/Ticks.h"
@@ -14,7 +14,7 @@ static inline bool AntiAimCheck(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUser
 
 void CPacketManip::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
-    if (F::StickyJumpControl.Controls(pCmd)) { G::SendPacket=true; return; }
+    if (F::AutoStickyJump.Controls(pCmd)) { G::SendPacket=true; return; }
 	F::FakeAngle.bDrawChams = Vars::Fakelag::Fakelag.Value || F::AntiAim.AntiAimOn();
 
 	G::SendPacket = true;

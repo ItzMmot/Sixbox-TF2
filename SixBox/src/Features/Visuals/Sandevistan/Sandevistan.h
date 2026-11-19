@@ -46,7 +46,7 @@ class CSandevistan
     int m_class=0,m_modelIndex=0,m_nextGhost=0,m_count=0,m_nextEvent=0;
     uint64_t m_serial=0,m_current=0;
     IMaterial* m_materials[3][2]{};
-    IMaterial* m_tinted[Sandevistan::MaxGhosts+64+32][3][2]{};
+    IMaterial* m_tinted[Sandevistan::MaxGhosts+64][3][2]{};
     IMaterial* TintMaterial(int slot,int style,bool through,Color_t color,float opacity);
     struct DrawPacket
     {
@@ -56,14 +56,6 @@ class CSandevistan
     };
     struct ViewDrawPacket : DrawPacket {std::array<matrix3x4,MAXSTUDIOBONES> bones{};};
     std::array<DrawPacket,Sandevistan::MaxGhosts> m_worldDraws{};
-    struct PreviewPacket : DrawPacket {std::array<matrix3x4,MAXSTUDIOBONES> bones{};};
-    std::array<PreviewPacket,32> m_previewPackets{};
-    int m_previewCount=0;
-    bool m_preview=false;
-    matrix3x4 m_previewFrom{},m_previewTo{};
-    Color_t m_previewColor{};
-    Vec3 m_previewAngles{};
-    bool m_previewThroughWalls=false;
     std::array<ViewDrawPacket,64> m_viewDraws{};
     size_t m_nextViewDraw=0;
     Event* FindEvent(uint64_t id);
@@ -78,7 +70,6 @@ public:
     void InitializeMaterials();
     void ShutdownMaterials();
     void RenderWorld(const CViewSetup* setup);
-    void RenderPreview(const Vec3& origin,const Vec3& angles,float scale,Color_t color,bool throughWalls);
     bool RenderBody(IVModelRender* render,const DrawModelState_t& state,const ModelRenderInfo_t& info,
                     matrix3x4* bones,DrawModelExecuteFn original);
     void RenderViewmodel(IVModelRender* render,const DrawModelState_t& state,const ModelRenderInfo_t& info,

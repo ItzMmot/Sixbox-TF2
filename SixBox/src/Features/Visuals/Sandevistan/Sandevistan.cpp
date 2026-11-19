@@ -135,7 +135,7 @@ void CSandevistan::InitializeMaterials()
 }
 IMaterial* CSandevistan::TintMaterial(int slot,int style,bool through,Color_t color,float opacity)
 {
-    if(slot<0||slot>=Sandevistan::MaxGhosts+64+32) return nullptr;
+    if(slot<0||slot>=Sandevistan::MaxGhosts+64) return nullptr;
     style=std::clamp(style,0,2);
     auto*& material=m_tinted[slot][style][through?1:0];
     if(!material)
@@ -224,27 +224,6 @@ void CSandevistan::RenderWorld(const CViewSetup* setup)
 bool CSandevistan::RenderBody(IVModelRender* render,const DrawModelState_t& state,const ModelRenderInfo_t& info,
                              matrix3x4* bones,DrawModelExecuteFn original)
 {
-    if(m_preview)
-    {
-        auto* local=H::Entities.GetLocal();
-        auto* entity=I::ClientEntityList->GetClientEntity(info.entity_index);
-        if(!local||!entity||!bones||!state.m_pStudioHdr||!state.m_pStudioHWData||!original) return true;
-        auto* base=entity->As<CBaseEntity>();
-        if(base!=local&&(!(base->IsWearable()||base->IsBaseCombatWeapon())||base->m_hOwnerEntity().Get()!=local)) return true;
-        const int count=state.m_pStudioHdr->numbones;
-        if(count<1||count>MAXSTUDIOBONES||m_previewCount>=int(m_previewPackets.size())) return true;
-        auto& packet=m_previewPackets[m_previewCount++];packet.info=info;packet.state=state;memcpy(packet.transform,m_previewTo,sizeof(matrix3x4));
-        Sandevistan::RebaseBones(packet.bones.data(),bones,count,m_previewFrom,m_previewTo);
-        packet.info.origin={m_previewTo[0][3],m_previewTo[1][3],m_previewTo[2][3]};
-        packet.info.angles=m_previewAngles;packet.info.pModelToWorld=&packet.transform;packet.info.pLightingOrigin=&packet.info.origin;
-        packet.state.m_pModelToWorld=&packet.transform;
-        I::ModelRender->ForcedMaterialOverride(m_materials[0][m_previewThroughWalls?1:0]);
-        auto* tint=TintMaterial(Sandevistan::MaxGhosts+64+m_previewCount-1,0,m_previewThroughWalls,m_previewColor,1.f);
-        if(!tint) return true;
-        I::ModelRender->ForcedMaterialOverride(tint);
-        original(render,packet.state,packet.info,packet.bones.data());
-        return true;
-    }
     if(!m_worldPass)return false;
     auto* local=H::Entities.GetLocal();
     if(!local||info.entity_index!=local->entindex()||info.pModel!=local->GetModel())return true;
@@ -298,40 +277,6 @@ bool CSandevistan::RenderBody(IVModelRender* render,const DrawModelState_t& stat
         {std::lock_guard lock(m_mutex);++m_diagnostics.drawn;}
     }
     return true; // Never draw the live seed body in first person.
-}
-void CSandevistan::RenderPreview(const Vec3& origin,const Vec3& angles,float scale,Color_t color,bool throughWalls)
-{
-    if(drawing||G::Unload||SDK::CleanScreenshot()||I::EngineVGui->IsGameUIVisible()||!F::Materials.m_bLoaded) return;
-    auto* local=H::Entities.GetLocal();if(!local||!local->IsAlive()) return;
-    CViewSetup view{};
-    const Vec3 mins=origin+local->m_vecMins()*scale,maxs=origin+local->m_vecMaxs()*scale;
-    if(I::Client->GetPlayerView(view)&&Sandevistan::CameraIntersects(view.origin.x,view.origin.y,view.origin.z,
-        mins.x,mins.y,mins.z,maxs.x,maxs.y,maxs.z,4.f)) return;
-    InitializeMaterials();if(!m_materials[0][throughWalls?1:0]) return;
-    const auto hook=U::Hooks.m_mHooks.find("CBaseAnimating_InternalDrawModel");
-    if(hook==U::Hooks.m_mHooks.end()||!hook->second->m_pOriginal) return;
-    Math::AngleMatrix(local->GetAbsAngles(),m_previewFrom);
-    Math::AngleMatrix(angles,m_previewTo);
-    const Vec3 source=local->GetAbsOrigin();
-    scale=std::clamp(scale,.5f,2.f);
-    for(int r=0;r<3;++r)
-    {
-        m_previewFrom[r][3]=source[r];m_previewTo[r][3]=origin[r];
-        for(int c=0;c<3;++c) m_previewTo[r][c]*=scale;
-    }
-    m_previewCount=0;m_previewColor=color;m_previewAngles=angles;m_previewThroughWalls=throughWalls;
-    RenderScope restore;DrawingScope drawingScope;
-    struct Scope {bool& value;Scope(bool& v):value(v){value=true;}~Scope(){value=false;}} preview(m_preview);
-    const auto draw=[&](CBaseEntity* entity) {
-        auto* renderable=entity->GetClientRenderable();if(!renderable) return;
-        if(renderable->GetModelInstance()==MODEL_INSTANCE_INVALID) renderable->CreateModelInstance();
-        I::ModelRender->ForcedMaterialOverride(m_materials[0][throughWalls?1:0]);
-        hook->second->As<InternalDrawModelFn>()(entity->As<CBaseAnimating>(),STUDIO_RENDER|STUDIO_NOSHADOWS);
-    };
-    draw(local);
-    int children=0;
-    for(auto* child=local->FirstMoveChild();child&&children++<64;child=child->NextMovePeer())
-        if((child->IsWearable()||child->IsBaseCombatWeapon())&&!child->IsWearableVM()&&!(child->m_fEffects()&EF_NODRAW)) draw(child);
 }
 void CSandevistan::ReportDiagnostics()
 {

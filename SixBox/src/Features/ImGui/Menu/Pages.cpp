@@ -1281,9 +1281,9 @@ static void MiscMain()
 		FToggle(ShieldTurnRate);
 		FToggle(NoPush);
 	} EndSection();
-	if (Section("Sticky Jump Control"))
+	if (Section("Auto Sticky Jump"))
 	{
-        using namespace Vars::Misc::Movement::StickyJumpControl;
+        using namespace Vars::Misc::Movement::AutoStickyJump;
         FToggle(Enabled);
         PushTransparent(!Enabled.Value);
         FKeybind(StartKey, FButtonEnum::None, {VK_LBUTTON, VK_RBUTTON, VK_SPACE});
@@ -1292,32 +1292,6 @@ static void MiscMain()
         FToggle(DrawStatus);
         FToggle(DrawMarkers);
         FNote("Press once to start; press again to cancel. Place stickies manually, then move into the launch window. Release fire/jump to start. All existing stickies may detonate. Scottish Resistance is unsupported.");
-        PopTransparent();
-	} EndSection();
-	if (Section("Auto sticky jump"))
-	{
-		using namespace Vars::Misc::Movement;
-        FToggle(AutoStickyJump::Enabled);
-        PushTransparent(!AutoStickyJump::Enabled.Value);
-        FDropdown(AutoStickyJump::Mode);FDropdown(AutoStickyJump::Rotation);
-        if(AutoStickyJump::Rotation.Value>=2) FSlider(AutoStickyJump::RotationSpeed);
-        FToggle(AutoStickyJump::AutoWalk);FSlider(AutoStickyJump::ApproachDistance);
-        FSlider(AutoStickyJump::Stickies);
-        if(AutoStickyJump::Stickies.Value==2) FToggle(AutoStickyJump::Doubletap);
-        FToggle(AutoStickyJump::FlushFirst);
-        PushTransparent(AutoStickyJump::FlushFirst.Value);FToggle(AutoStickyJump::PreserveTraps);PopTransparent();
-        FToggle(AutoStickyJump::Repeat);
-        FToggle(AutoStickyJump::CoachIntegration);
-        if(FPopupButton("Sticky jump rendering"))
-        {
-            FToggle(AutoStickyJump::DrawPath);FToggle(AutoStickyJump::DrawTrajectory);
-            FToggle(AutoStickyJump::DrawArrow);FToggle(AutoStickyJump::DrawSilhouette);
-            FToggle(AutoStickyJump::DrawHUD);FToggle(AutoStickyJump::ThroughWalls);
-            FSlider(AutoStickyJump::MarkerScale);FColorPicker(AutoStickyJump::PathColor);
-            FColorPicker(AutoStickyJump::LaunchColor);FColorPicker(AutoStickyJump::ShotColor);
-            EndPopup();
-        }
-        FNote("Hold a sticky launcher and enable with a bind. One jump per activation unless Repeat is on. Charged ticks shorten the shot interval within server limits.");
         PopTransparent();
 	} EndSection();
 	if (Section("Auto dodge"))

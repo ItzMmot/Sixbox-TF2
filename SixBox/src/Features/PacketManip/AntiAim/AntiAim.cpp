@@ -1,5 +1,5 @@
 #include "AntiAim.h"
-#include "../../Misc/StickyJumpControl/StickyJumpControl.h"
+#include "../../Aimbot/AutoStickyJump/AutoStickyJump.h"
 #include "../../Aimbot/AutoTrolldier/AutoTrolldier.h"
 
 #include "../../Ticks/Ticks.h"
@@ -34,7 +34,7 @@ bool CAntiAim::YawOn()
 
 bool CAntiAim::ShouldRun(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
-    if (F::StickyJumpControl.Controls(pCmd)) return false;
+    if (F::AutoStickyJump.Controls(pCmd)) return false;
 	if (F::AutoTrolldier.HasCommittedStrike(pLocal, pWeapon, pCmd)
 		|| F::AutoTrolldier.IsActive(pCmd) && (Vars::Misc::Movement::AutoTrolldier::Rotation.Value
 			|| G::AimPoint.m_iTickCount == I::GlobalVars->tickcount))

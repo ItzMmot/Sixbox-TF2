@@ -1,511 +1,437 @@
 #include "AutoStickyJump.h"
-#include "../../ImGui/Menu/Menu.h"
-#include "../AutoRocketJump/JumpPolicy.h"
-#include "../AutoTrolldier/Rotation.h"
-#include "../../Simulation/ProjectileSimulation/ProjectileSimulation.h"
+#include "../../Simulation/MovementSimulation/MovementSimulation.h"
+#include "../../Misc/AutoDodge/AutoDodge.h"
 #include "../../Ticks/Ticks.h"
-#include "../../Configs/Configs.h"
-#include <fstream>
+#include "../../ImGui/Menu/Menu.h"
+#include <array>
+#include <chrono>
+#include <cstdio>
 
 namespace
 {
-    using namespace Vars::Misc::Movement::AutoStickyJump;
-    using Phase=StickyJump::Phase;
-    bool Floor(const CGameTrace& t)
+    using namespace StickyJump;
+    Vec V(const Vec3& v) { return {v.x,v.y,v.z}; }
+    Vec3 E(Vec v) { return {v.x,v.y,v.z}; }
+    float Convar(const char* name, float fallback)
     {
-        return t.DidHit()&&!t.startsolid&&!t.allsolid&&t.plane.normal.z>=.7f
-            &&!(t.surface.flags&(SURF_SKY|SURF_SKY2D));
+        auto var=H::ConVars.FindVar(name);
+        return var ? var->GetFloat() : fallback;
     }
-    float Time(CTFPlayer* local) {return TICKS_TO_TIME(local->m_nTickBase());}
+    Body ReadBody(CTFPlayer* player)
+    {
+        Body body;
+        body.origin=V(player->m_vecOrigin()); body.velocity=V(player->m_vecVelocity());
+        body.mins=V(player->m_vecMins()); body.maxs=V(player->m_vecMaxs());
+        body.ducked=player->IsDucking(); body.grounded=player->IsOnGround();
+        return body;
+    }
+    uint32_t Identity(CBaseEntity* entity)
+    {
+        return entity->GetRefEHandle().ToInt();
+    }
+    bool Supported(CTFWeaponBase* weapon)
+    {
+        // Stock, reskins, Jumper and Quickiebomb all use global detonation.
+        return weapon && StickyJump::SupportedLauncher(weapon->GetWeaponID()==TF_WEAPON_PIPEBOMBLAUNCHER,
+            weapon->GetWeaponID()==TF_WEAPON_PIPEBOMBLAUNCHER ? weapon->As<CTFPipebombLauncher>()->GetDetonateType() : -1);
+    }
+    bool DetonatorAvailable(CTFPlayer* local)
+    {
+        // The launcher's ItemBusyFrame calls SecondaryAttack during reload;
+        // that path checks CanAttack, not the generic busy-frame attack clocks.
+        return local->CanAttack();
+    }
+    void DestroySimulation(CProjectileSimulation& simulation)
+    {
+        if (simulation.m_pEnv) I::Physics->DestroyEnvironment(simulation.m_pEnv);
+        if (simulation.m_pBoxCollide) I::PhysicsCollision->DestroyCollide(simulation.m_pBoxCollide);
+        simulation.m_pEnv=nullptr; simulation.m_pBoxCollide=nullptr;
+        simulation.m_pObj=simulation.m_pObjBox=nullptr; simulation.m_pCurrent=nullptr;
+    }
 }
+
+// Engine access is confined to this adapter. Candidate generation is resumed
+// between commands; the independent VPhysics instance survives those slices.
+class CStickyJumpWorld
+{
+    using Clock=std::chrono::steady_clock;
+    CTFPlayer* m_local=nullptr;
+    CTFWeaponBase* m_weapon=nullptr;
+    CUserCmd m_raw;
+    StickyJump::Frame m_seed;
+    CScopedLocalMovement::Snapshot m_seedPlayer;
+    CUserCmd m_seedRaw;
+    std::array<StickyJump::Body,17> m_jump;
+    struct Landing { StickyJump::Vec origin; bool checked=false, valid=false; };
+    std::vector<Landing> m_landings;
+    bool m_jumpReady=false;
+    CProjectileSimulation m_liveSimulation;
+    struct SeedProjectile { uint32_t id; ProjectileInfo info; };
+    std::vector<SeedProjectile> m_seedProjectiles;
+    std::vector<CTFGrenadePipebombProjectile*> m_entities;
+    struct ForecastCache
+    {
+        uint32_t id=0;
+        int ticks=0;
+        StickyJump::Vec position;
+        bool valid=false;
+    };
+    std::vector<ForecastCache> m_forecasts;
+    std::vector<ForecastCache> m_seedForecasts;
+    StickyJump::Body m_baseline;
+    float m_baselineTime=0;
+
+    StickyJump::Bomb Prototype() const
+    {
+        StickyJump::Bomb bomb;
+        bomb.damage=m_weapon->GetDamage(false);
+        bomb.pushMultiplier=SDK::AttribHookValue(1.f,"mult_dmgself_push_force",m_weapon);
+        const int type=m_weapon->GetDamageType();
+        bomb.falloff=(type&DMG_RADIUS_MAX) ? 0.f : (type&DMG_HALF_FALLOFF) ? .5f : bomb.damage/146.f;
+        const float modifier=SDK::AttribHookValue(1.f,"mult_dmg_falloff",m_weapon);
+        if (modifier!=1.f) bomb.falloff+=modifier;
+        return bomb;
+    }
+    bool Floor(StickyJump::Vec point, StickyJump::Vec& origin)
+    {
+        CTraceFilterWorldAndPropsOnly filter(m_local);
+        CGameTrace trace;
+        SDK::TraceHull(E(point)+Vec3{0,0,36},E(point)-Vec3{0,0,64},
+            {-24,-24,0},{24,24,1},MASK_PLAYERSOLID,&filter,&trace);
+        if (trace.startsolid || trace.allsolid || trace.fraction>=1 || trace.plane.normal.z<.7f) return false;
+        origin=V(trace.endpos)+StickyJump::Vec{0,0,.1f};
+        SDK::TraceHull(E(origin),E(origin),{-24,-24,0},{24,24,82},MASK_PLAYERSOLID,&filter,&trace);
+        return !trace.startsolid && !trace.allsolid;
+    }
+    bool Visible(StickyJump::Vec from, const StickyJump::Body& body)
+    {
+        CTraceFilterWorldAndPropsOnly filter(m_local);
+        CGameTrace trace;
+        const auto center=body.origin+(body.mins+body.maxs)*.5f;
+        SDK::TraceHull(E(from),E(center),{},{},MASK_SOLID,&filter,&trace);
+        return !trace.startsolid && !trace.allsolid && trace.fraction>.99f;
+    }
+    bool Forecast(const StickyJump::Bomb& bomb, int ticks, StickyJump::Vec& position, bool seed=false)
+    {
+        position=bomb.position;
+        if (bomb.touched || ticks<=0) return true;
+        auto& forecasts=seed ? m_seedForecasts : m_forecasts;
+        const auto cached=std::find_if(forecasts.begin(),forecasts.end(),[&](const auto& c){return c.id==bomb.id && c.ticks==ticks;});
+        if (cached!=forecasts.end()) { position=cached->position; return cached->valid; }
+        ProjectileInfo info;
+        CTFGrenadePipebombProjectile* entity=nullptr;
+        if (seed)
+        {
+            const auto it=std::find_if(m_seedProjectiles.begin(),m_seedProjectiles.end(),[&](const auto& p){return p.id==bomb.id;});
+            if (it==m_seedProjectiles.end()) return false;
+            info=it->info;
+        }
+        else
+        {
+            const auto it=std::find_if(m_entities.begin(),m_entities.end(),[&](auto* e){return Identity(e)==bomb.id;});
+            if (it==m_entities.end()) return false;
+            entity=*it; m_liveSimulation.GetInfo(entity,info);
+        }
+        if (!m_liveSimulation.Initialize(info,false,true)) return false;
+        CTraceFilterCollideable filter(m_local); int mask=MASK_SOLID;
+        if (entity) m_liveSimulation.SetupTrace(filter,mask,entity);
+        for (int tick=0;tick<ticks;++tick)
+        {
+            const Vec3 previous=m_liveSimulation.GetOrigin();
+            m_liveSimulation.RunTick(info,false);
+            CGameTrace trace;
+            SDK::TraceHull(previous,m_liveSimulation.GetOrigin(),-info.m_vHull,info.m_vHull,mask,&filter,&trace);
+            if (trace.startsolid || trace.allsolid) return false;
+            position=V(m_liveSimulation.GetOrigin());
+            if (trace.fraction<1)
+            {
+                // A prospective bounce against a moving entity is uncertain.
+                if (trace.m_pEnt && trace.m_pEnt->entindex()!=0) return false;
+                position=V(trace.endpos+trace.plane.normal);
+                break;
+            }
+        }
+        const bool valid=position.Finite();
+        forecasts.push_back({bomb.id,ticks,position,valid});
+        return valid;
+    }
+    StickyJump::Vec Boost(const StickyJump::Frame& frame, const StickyJump::Body& body,
+        int ticks, bool requireArmed, bool& certain)
+    {
+        using namespace StickyJump;
+        Vec impulse; certain=true;
+        for (auto bomb:frame.bombs)
+        {
+            // Distant traps still detonate, but cannot contribute to this jump.
+            if ((bomb.position-body.origin).Length()>400.f+bomb.velocity.Length()*ticks*frame.interval) continue;
+            if (requireArmed && !Armed(bomb,frame.projectileTime-2.f*frame.interval)) { certain=false; return {}; }
+            if (!Forecast(bomb,ticks,bomb.position,&frame==&m_seed)) { certain=false; return {}; }
+            impulse=impulse+BlastImpulse(bomb,body,Visible(bomb.position,body));
+        }
+        return impulse;
+    }
+    bool Clearance(const StickyJump::Body& body, StickyJump::Vec delta)
+    {
+        CTraceFilterWorldAndPropsOnly filter(m_local); CGameTrace trace;
+        const auto end=body.origin+(body.velocity+delta)*.12f+StickyJump::Vec{0,0,-SDK::GetGravity()*.0072f};
+        SDK::TraceHull(E(body.origin),E(end),E(body.mins),E(body.maxs),MASK_PLAYERSOLID,&filter,&trace);
+        return !trace.startsolid && !trace.allsolid && trace.fraction>.99f;
+    }
+    bool Probe(int ticks, StickyJump::Body& result)
+    {
+        CScopedLocalMovement movement(m_local,false);
+        if (!movement.Valid()) return false;
+        CUserCmd command=m_raw;
+        command.buttons&=~(IN_ATTACK|IN_ATTACK2|IN_JUMP);
+        for (int tick=0;tick<ticks;++tick)
+        {
+            command.buttons|=IN_DUCK;
+            if (tick==0 && m_local->IsOnGround()) command.buttons|=IN_JUMP;
+            else command.buttons&=~IN_JUMP;
+            if (!movement.Step(command)) return false;
+        }
+        result=ReadBody(m_local);
+        return !result.grounded && result.origin.Finite();
+    }
+public:
+    double Now() const { return std::chrono::duration<double>(Clock::now().time_since_epoch()).count(); }
+    void Unload() { DestroySimulation(m_liveSimulation); }
+    void Bind(CTFPlayer* local, CTFWeaponBase* weapon, const CUserCmd& raw)
+    { m_local=local; m_weapon=weapon; m_raw=raw; m_forecasts.clear(); }
+    std::vector<StickyJump::Bomb> Bombs()
+    {
+        using namespace StickyJump;
+        std::vector<Bomb> bombs; m_entities.clear();
+        // Use the shared SDK entity inventory, including practice projectiles.
+        for (auto entity:H::Entities.GetGroup(EntityEnum::LocalStickies))
+        {
+            auto sticky=entity->As<CTFGrenadePipebombProjectile>();
+            if (!sticky->HasStickyEffects() || sticky->m_hThrower().Get()!=m_local) continue;
+            auto launcher=sticky->m_hLauncher().Get();
+            if (!launcher || launcher!=m_weapon) continue;
+            Bomb bomb=Prototype(); bomb.id=Identity(sticky);
+            bomb.position=V(sticky->GetAbsOrigin()); bomb.velocity=V(sticky->GetAbsVelocity());
+            bomb.touched=sticky->m_bTouched(); bomb.created=sticky->m_flCreationTime();
+            bomb.ageKnown=std::isfinite(bomb.created) && bomb.created>0;
+            bomb.armTime=SDK::AttribHookValue(Convar("tf_grenadelauncher_livetime",.8f),"sticky_arm_time",m_weapon);
+            if (m_local->InCond(TF_COND_RUNE_HASTE)) bomb.armTime*=.5f;
+            else if (m_local->InCond(TF_COND_RUNE_KING)||m_local->InCond(TF_COND_KING_BUFFED)) bomb.armTime*=.75f;
+            if (bomb.position.Finite() && bomb.velocity.Finite()) { bombs.push_back(bomb); m_entities.push_back(sticky); }
+        }
+        return bombs;
+    }
+    void BeginSearch(const StickyJump::Frame& frame, const StickyJump::Request&)
+    {
+        m_seed=frame; m_jumpReady=false;
+        m_seedPlayer=CScopedLocalMovement::Capture(m_local); m_seedRaw=m_raw;
+        m_seedForecasts.clear(); m_seedProjectiles.clear();
+        for (auto* entity:m_entities)
+        {
+            ProjectileInfo info; m_liveSimulation.GetInfo(entity,info);
+            m_seedProjectiles.push_back({Identity(entity),info});
+        }
+        m_landings.assign(frame.bombs.size()*43,{});
+    }
+    StickyJump::SampleResult NextCandidate(int cursor, const StickyJump::Frame&,
+        const StickyJump::Request& request, StickyJump::Candidate& candidate)
+    {
+        using namespace StickyJump;
+        if (!m_jumpReady)
+        {
+            CScopedLocalMovement movement(m_local,false,&m_seedPlayer);
+            if (!movement.Valid()) return SampleResult::Done;
+            // Normalize using local geometry independent of held movement.
+            Vec floor;
+            bool found=false;
+            for (const auto& bomb:m_seed.bombs)
+                if (Floor(bomb.position,floor)) { found=true; break; }
+            if (!found) return SampleResult::Done;
+            m_local->m_vecOrigin()=E(floor); m_local->SetAbsOrigin(E(floor));
+            m_local->m_fFlags()|=FL_ONGROUND;
+            CUserCmd command=m_seedRaw;
+            command.forwardmove=command.sidemove=command.upmove=0;
+            command.buttons&=~(IN_ATTACK|IN_ATTACK2|IN_JUMP);
+            m_local->m_vecVelocity()={}; m_local->SetAbsVelocity({});
+            m_jump[0]=ReadBody(m_local);
+            for (int tick=1;tick<=16;++tick)
+            {
+                command.buttons|=IN_DUCK;
+                if (tick==1) command.buttons|=IN_JUMP; else command.buttons&=~IN_JUMP;
+                if (!movement.Step(command)) return SampleResult::Done;
+                m_jump[tick]=ReadBody(m_local);
+            }
+            m_jumpReady=true;
+            return SampleResult::Pending;
+        }
+        constexpr int radii=43, times=6;
+        static constexpr int jumpTicks[]={1,2,4,7,11,16};
+        const int anchors=int(m_seed.bombs.size());
+        const int layout=cursor/(radii*times);
+        if (layout>=anchors) return SampleResult::Done;
+        const Vec anchor=m_seed.bombs[layout].position;
+        // Sample along the desired push ray; the third coordinate comes from
+        // traced walkable geometry instead of an assumed flat floor.
+        const float yaw=request.yaw*Pi/180.f;
+        const int radial=(cursor/times)%radii;
+        const Vec point=anchor+Vec{std::cos(yaw),std::sin(yaw),0}*(float(radial)*4.f);
+        auto& landing=m_landings[layout*radii+radial];
+        if (!landing.checked)
+        {
+            landing.checked=true;
+            landing.valid=(point-request.start).Length()<=256.f && Floor(point,landing.origin);
+        }
+        if (!landing.valid) return SampleResult::Sample;
+        candidate.takeoff=landing.origin;
+        candidate.jumpTicks=jumpTicks[cursor%times];
+        Body body=m_jump[candidate.jumpTicks];
+        body.origin=candidate.takeoff+(body.origin-m_jump[0].origin);
+        if (body.grounded) return SampleResult::Sample;
+        bool certain;
+        candidate.delta=Boost(m_seed,body,candidate.jumpTicks,false,certain);
+        candidate.valid=certain && Clearance(body,candidate.delta);
+        return SampleResult::Sample;
+    }
+    bool Ready(const StickyJump::Frame& frame, const StickyJump::Request& request,
+        float target, StickyJump::Vec& delta)
+    {
+        using namespace StickyJump;
+        if (!LaunchArmed(frame)) return false;
+        Body body;
+        if (!Probe(1,body)) return false;
+        bool certain;
+        delta=Boost(frame,body,1,true,certain);
+        m_baseline=body;
+        return certain && MeetsTarget(delta,request.Wish(),target) && Clearance(body,delta);
+    }
+    bool CanBeginJump(const StickyJump::Frame& frame, const StickyJump::Request& request,
+        StickyJump::Candidate& candidate, float target)
+    {
+        if (!frame.grounded || !StickyJump::LaunchArmed(frame)) return false;
+        StickyJump::Body body;
+        if (!Probe(candidate.jumpTicks,body)) return false;
+        bool certain;
+        const auto delta=Boost(frame,body,candidate.jumpTicks,true,certain);
+        const bool valid=certain && StickyJump::MeetsTarget(delta,request.Wish(),target) && Clearance(body,delta);
+        if (valid) candidate.delta=delta;
+        return valid;
+    }
+    void RecordBaseline(const StickyJump::Frame& frame) { m_baselineTime=frame.gameTime+frame.interval; }
+    float MeasuredBoost(const StickyJump::Body&, const StickyJump::Frame& frame)
+    {
+        const float elapsed=(std::max)(0.f,frame.gameTime-m_baselineTime);
+        const auto expected=m_baseline.velocity+StickyJump::Vec{0,0,-SDK::GetGravity()*elapsed};
+        return (frame.body.velocity-expected).Length();
+    }
+};
+
+CAutoStickyJump::CAutoStickyJump() = default;
+CAutoStickyJump::~CAutoStickyJump() = default;
+
 void CAutoStickyJump::Reset()
 {
-    F::Ticks.CancelStickyJumpBurst();
-    m_display.Set({});m_baseline.clear();m_plan={};m_fire={};m_flush={};m_flushDone=m_flushHeading=false;m_flushWish={};m_firstSeen.clear();m_reason=nullptr;m_diagnostics={};m_loggedStatus=nullptr;m_nextDiagnostics=0;m_owner.Term();m_weapon.Term();m_phase=Phase::Plan;
-    m_mode=m_rotationMode=m_lastCommand=m_controlCommand=m_chargeCommand=m_jumpCommand=m_shotCommand=-1;m_released=0;m_spawn=-1;
-    m_started=m_phaseTime=m_lastRelease=0;m_lastSearch=m_lastShotCheck=-100;m_pitchSpeed=m_yawSpeed=0;
-    m_rotationValid=m_airborne=m_burstTried=false;m_worldMove={};
+    m_controller.Reset(); m_controls=false; m_command=0; m_key={};
 }
-void CAutoStickyJump::Stage(Phase phase,float now) {m_phase=phase;m_phaseTime=now;m_reason=nullptr;}
-void CAutoStickyJump::Publish(float remaining,const char* status)
+void CAutoStickyJump::Unload()
 {
-    m_plan.active=true;m_plan.phase=m_phase;m_plan.wanted=std::clamp(Stickies.Value,1,2);
-    m_plan.armRemaining=(std::max)(0.f,remaining);if(status) m_reason=status;
-    m_plan.status=m_reason?m_reason:StickyJump::Label(m_phase);
-    m_plan.expires=GetTickCount64()+350;m_display.Set(m_plan);
-    const auto stamp=GetTickCount64();
-    const bool nearWindow=m_phase==Phase::Approach&&m_diagnostics.best>0&&m_diagnostics.ahead<=.12f;
-    if(m_loggedPhase!=m_phase||m_loggedStatus!=m_plan.status||(nearWindow&&stamp>=m_nextDiagnostics))
+    Reset();
+    if (m_world) m_world->Unload();
+    m_world.reset();
+}
+void CAutoStickyJump::Prepare(CTFPlayer* local, CTFWeaponBase* weapon, CUserCmd* command)
+{
+    using namespace StickyJump;
+    namespace Config=Vars::Misc::Movement::AutoStickyJump;
+    if (!local || !command) { Reset(); return; }
+    if (!Config::Enabled.Value && !Busy()) { m_controls=false; return; }
+    if (!m_world) m_world=std::make_unique<CStickyJumpWorld>();
+    m_world->Bind(local,weapon,G::OriginalCmd);
+    Frame frame;
+    frame.command=command->command_number;
+    frame.weapon=weapon ? Identity(weapon) : 0;
+    frame.wallTime=m_world->Now(); frame.gameTime=TICKS_TO_TIME(local->m_nTickBase()); frame.interval=TICK_INTERVAL;
+    // OnDataChanged stamps m_flCreationTime using this clock. Prediction's
+    // tickbase can lead it and must only be used for weapon attack cooldowns.
+    frame.projectileTime=I::GlobalVars->curtime;
+    frame.body=ReadBody(local); frame.grounded=local->IsOnGround(); frame.yaw=G::OriginalCmd.viewangles.y;
+    frame.pitch=G::OriginalCmd.viewangles.x;
+    frame.enabled=Config::Enabled.Value;
+    frame.eligible=Supported(weapon) && local->IsAlive() && local->m_iClass()==TF_CLASS_DEMOMAN
+        && local->m_MoveType()==MOVETYPE_WALK && !local->IsSwimming() && !local->IsTaunting() && !local->IsAGhost()
+        && !local->InCond(TF_COND_HALLOWEEN_KART) && !local->InCond(TF_COND_SHIELD_CHARGE)
+        && !local->InCond(TF_COND_RUNE_PRECISION) && SDK::IsGameWindowInFocus()
+        && !I::EngineVGui->IsGameUIVisible() && !F::Menu.m_bIsOpen
+        && frame.body.origin.Finite() && frame.body.velocity.Finite();
+    frame.dodge=F::AutoDodge.Controls(command);
+    frame.shifting=F::Ticks.m_bWarp || F::Ticks.m_bDoubletap || F::Ticks.m_bShifting;
+    frame.manualCombat=bool(G::OriginalCmd.buttons&(IN_ATTACK|IN_ATTACK2|IN_ATTACK3|IN_JUMP));
+    if (frame.eligible)
     {
-        m_nextDiagnostics=stamp+100;m_loggedPhase=m_phase;m_loggedStatus=m_plan.status;
-        if(!F::Configs.m_sCorePath.empty())
+        frame.bombs=m_world->Bombs();
+        frame.canDetonate=DetonatorAvailable(local);
+        if (!Busy() && weapon->As<CTFPipebombLauncher>()->m_flChargeBeginTime()>0) frame.eligible=false;
+    }
+    // A dedicated key storage makes a held key one activation, independent of
+    // UI binds and repeated prediction of the same command number.
+    if (command->command_number!=m_command) frame.pressed=U::KeyHandler.Pressed(Config::StartKey.Value,true,&m_key);
+    Request request;
+    request.direction=Config::Direction.Value==Config::DirectionEnum::Horizontal ? Direction::Horizontal
+        : Config::Direction.Value==Config::DirectionEnum::Vertical ? Direction::Vertical : Direction::Diagonal;
+    request.automatic=Config::Direction.Value==Config::DirectionEnum::Auto;
+    request.power=Config::Power.Value;
+    const auto output=m_controller.Run(frame,request,*m_world);
+    m_command=command->command_number; m_controls=output.controls;
+    if (!m_controls) return;
+    m_intent=G::OriginalCmd;
+    m_intent.buttons&=~(IN_ATTACK|IN_ATTACK2|IN_ATTACK3|IN_JUMP);
+    m_intent.weaponselect=0;
+    if (output.duck) m_intent.buttons|=IN_DUCK;
+    if (output.jump) m_intent.buttons|=IN_JUMP;
+    if (output.detonate) m_intent.buttons|=IN_ATTACK2;
+    Apply(local,command);
+}
+void CAutoStickyJump::Apply(CTFPlayer* local, CUserCmd* command)
+{
+    if (!Controls(command)) return;
+    command->buttons=m_intent.buttons;
+    command->forwardmove=m_intent.forwardmove; command->sidemove=m_intent.sidemove; command->upmove=m_intent.upmove;
+    command->weaponselect=0; command->viewangles=m_intent.viewangles;
+    G::SilentAngles=false; G::PSilentAngles=false;
+    G::Attacking=SDK::IsAttacking(local,H::Entities.GetWeapon(),command);
+    G::SendPacket=true;
+}
+void CAutoStickyJump::Draw()
+{
+#ifndef TEXTMODE
+    using namespace Vars::Misc::Movement::AutoStickyJump;
+    if (!Enabled.Value || !m_world || SDK::CleanScreenshot()) return;
+    const auto display=Snapshot();
+    if (display.expires<m_world->Now()) return;
+    const auto& font=H::Fonts.GetFont(FONT_INDICATORS);
+    const Color_t color{145,218,255,255};
+    if (DrawStatus.Value)
+    {
+        char mode[64]{};
+        if (display.automatic)
         {
-            const auto path=std::filesystem::path(F::Configs.m_sCorePath)/"sticky-jump.log";
-            std::error_code error;const auto bytes=std::filesystem::file_size(path,error);
-            std::ofstream log(path,(!error&&bytes>1024*1024)?std::ios::trunc:std::ios::app);
-            auto* local=m_owner.Get();auto* weapon=m_weapon.Get();
-            if(log&&local&&weapon)
-                log<<"v5 cmd="<<G::OriginalCmd.command_number<<" time="<<Time(local)<<" phase="<<int(m_phase)
-                   <<" status="<<m_plan.status<<" count="<<m_plan.count<<'/'<<m_plan.wanted<<" sent="<<m_released
-                   <<" weapon="<<weapon->m_iItemDefinitionIndex()<<" native_count="<<weapon->As<CTFPipebombLauncher>()->m_iPipebombCount()
-                   <<" attached="<<m_diagnostics.attached<<" armed="<<m_diagnostics.armed<<" clear="<<m_diagnostics.clear
-                   <<" ground="<<local->IsOnGround()<<" secondary="<<weapon->CanSecondaryAttack()
-                   <<" next_secondary="<<weapon->m_flNextSecondaryAttack()<<" owner_next_attack="<<local->m_flNextAttack()
-                   <<" speed="<<local->m_vecVelocity().Length2D()<<" raw_speed="<<m_diagnostics.rawSpeed
-                   <<" raw_created="<<m_diagnostics.rawCreation<<" arm_remaining="<<m_plan.armRemaining
-                   <<" score="<<m_diagnostics.current<<" best="<<m_diagnostics.best<<" ahead="<<m_diagnostics.ahead<<'\n';
-            if(!log)
-            {
-                static bool reported=false;
-                if(!reported) {reported=true;SDK::Output("Sticky jump","Cannot write Core/sticky-jump.log",WARNING_COLOR);}
-            }
+            const char* names[]={"Horizontal","Diagonal","Vertical"};
+            std::snprintf(mode,sizeof(mode)," | Auto %s (%+.1f deg)",names[int(display.direction)],display.elevation);
         }
+        char message[256];
+        std::snprintf(message,sizeof(message),"Auto Sticky Jump%s | %s | %.0f%% | target %.0f / predicted %.0f HU/s | measured %.0f",
+            mode,display.status,display.power,display.target,display.predicted,display.measured);
+        H::Draw.StringWithBackground(font,H::Draw.m_nScreenW/2,int(H::Draw.m_nScreenH*.75f),color,{17,20,28,220},ALIGN_TOP,message);
     }
-}
-bool CAutoStickyJump::FlightPreview() const
-{
-    return Enabled.Value&&CoachIntegration.Value&&m_plan.valid&&m_phase!=Phase::Done&&m_phase!=Phase::Failed;
-}
-float CAutoStickyJump::ArmTime(CTFPlayer* local,CTFWeaponBase* weapon) const
-{
-    static auto live=H::ConVars.FindVar("tf_grenadelauncher_livetime");
-    const float base=live?live->GetFloat():.8f;
-    const int rune=local->InCond(TF_COND_RUNE_HASTE)?1:
-        (local->InCond(TF_COND_RUNE_KING)||local->InCond(TF_COND_KING_BUFFED))?2:0;
-    // Attribute is evaluated on the real weapon, including server attributes.
-    return StickyJump::ArmTime(SDK::AttribHookValue(base,"sticky_arm_time",weapon),1.f,rune);
-}
-float CAutoStickyJump::CreationTime(CTFGrenadePipebombProjectile* sticky,float now)
-{
-    const int id=sticky->GetRefEHandle().ToInt();
-    const auto [seen,_]=m_firstSeen.try_emplace(id,now);
-    const float created=sticky->m_flCreationTime();
-    // Some client snapshots have no valid creation timestamp. First observation
-    // is a conservative lower bound on age, never a reason to call it armed.
-    return StickyJump::CreationTime(created,now,m_started,seen->second,m_phase==Phase::Flush);
-}
-bool CAutoStickyJump::Flush(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* cmd)
-{
-    const auto& projectiles=H::Entities.GetGroup(EntityEnum::LocalStickies);
-    if(m_flush.Done(int(projectiles.size()),weapon->As<CTFPipebombLauncher>()->m_iPipebombCount(),G::OriginalCmd.command_number))
+    if (DrawMarkers.Value && display.markers)
     {
-        m_flushDone=true;m_firstSeen.clear();m_baseline.clear();m_lastSearch=-100;
-        if(m_phase==Phase::Flush) {Stage(Phase::Plan,Time(local));m_rotationValid=false;}
-        return true;
-    }
-    const float now=Time(local);
-    if(m_phase!=Phase::Flush)
-    {
-        m_flushWish=m_worldMove.Normalized2D();
-        if(m_flushWish.IsZero()) Math::AngleVectors({0,G::OriginalCmd.viewangles.y,0},&m_flushWish);
-        m_flushHeading=true;Stage(Phase::Flush,now);
-    }
-    if(AutoWalk.Value&&local->m_vecVelocity().Length2D()>30.f)
-        m_worldMove=local->m_vecVelocity().Normalized2D()*450.f;
-    if(now-m_phaseTime>5.f) {Stage(Phase::Failed,now);Publish(0,"Could not flush stickies - toggle to retry");return false;}
-    CTFGrenadePipebombProjectile* selected=nullptr;float soonest=FLT_MAX;
-    for(auto* entity:projectiles)
-    {
-        auto* sticky=entity->As<CTFGrenadePipebombProjectile>();
-        if(sticky->m_hOriginalLauncher().Get()!=weapon) continue;
-        const float remaining=CreationTime(sticky,now)+ArmTime(local,weapon)+TICK_INTERVAL-now;
-        if(remaining<soonest) {soonest=remaining;selected=sticky;}
-    }
-    const bool directional=weapon->As<CTFPipebombLauncher>()->GetDetonateType()==TF_DETONATE_MODE_DOT;
-    bool aim=!directional;
-    if(directional&&selected) aim=Rotate(cmd,Math::CalcAngle(local->GetShootPos(),selected->m_vecOrigin()));
-    if(aim&&(!selected||soonest<=0)) m_setButtons|=IN_ATTACK2;
-    m_plan.count=int(projectiles.size());Publish(selected?(std::max)(0.f,soonest):0,"Flushing old stickies - waiting for removal");
-    return false;
-}
-bool CAutoStickyJump::Route(CTFPlayer* local,const Vec3& to,Display* display)
-{
-    CTraceFilterWorldAndPropsOnly filter(local);
-    const Vec3 start=local->m_vecOrigin(),delta=to-start;
-    const int steps=std::clamp(int(std::ceil(delta.Length2D()/16.f)),1,90);
-    Vec3 previous=start;
-    if(display) {display->approachCount=1;display->approach[0]=start+Vec3(0,0,2);}
-    for(int n=1;n<=steps;++n)
-    {
-        Vec3 next=start+delta*(float(n)/steps);next.z=previous.z;
-        CGameTrace sweep{},floor{};
-        SDK::TraceHull(previous+Vec3(0,0,18),next+Vec3(0,0,18),local->m_vecMins(),local->m_vecMaxs(),local->SolidMask(),&filter,&sweep);
-        if(sweep.startsolid||sweep.allsolid||sweep.fraction<.999f) return false;
-        SDK::TraceHull(next+Vec3(0,0,18),next-Vec3(0,0,64),local->m_vecMins(),local->m_vecMaxs(),local->SolidMask(),&filter,&floor);
-        if(!Floor(floor)||std::abs(floor.endpos.z-previous.z)>18.1f) return false;
-        previous=floor.endpos;
-        if(display&&display->approachCount<int(display->approach.size())) display->approach[display->approachCount++]=previous+Vec3(0,0,2);
-    }
-    if(display) display->takeoff=previous;
-    return true;
-}
-bool CAutoStickyJump::Shot(CTFPlayer* local,CTFWeaponBase* weapon,const Vec3& point,Vec3& angle,Display* display,bool validate)
-{
-    // Prepare runs before EnginePrediction::Start; charge duration still needs
-    // the weapon owner's predicted clock, not the last network snapshot time.
-    struct ClockScope
-    {
-        float old=I::GlobalVars->curtime;
-        explicit ClockScope(float now) {I::GlobalVars->curtime=now;}
-        ~ClockScope() {I::GlobalVars->curtime=old;}
-    } clock(Time(local));
-    angle=Math::CalcAngle(local->GetShootPos(),point);
-    ProjectileInfo info{};
-    // Solve the low ballistic arc, including the grenade's upward launch impulse
-    // and actual muzzle offset. Verify it with the existing VPhysics simulator.
-    for(int refine=0;refine<4;++refine)
-    {
-        if(!F::ProjSim.GetInfo(local,weapon,angle,info,ProjSimEnum::InitCheck|ProjSimEnum::NoRandomAngles)) return false;
-        const Vec3 delta=point-info.m_vPos;
-        angle=Math::CalcAngle(info.m_vPos,point);
-        if(!StickyJumpMath::LowArc(delta.Length2D(),delta.z,info.m_flVelocity,info.m_flGravity,angle.x)) return false;
-        Math::ClampAngles(angle);
-    }
-    if(!validate) return true;
-    if(!F::ProjSim.GetInfo(local,weapon,angle,info,ProjSimEnum::InitCheck|ProjSimEnum::NoRandomAngles)
-        ||!F::ProjSim.Initialize(info)) return false;
-    CTraceFilterWorldAndPropsOnly filter(local);
-    Vec3 previous=F::ProjSim.GetOrigin();
-    if(display) {display->trajectoryCount=1;display->trajectory[0]=previous;}
-    for(int n=0;n<80;++n)
-    {
-        F::ProjSim.RunTick(info,false);
-        Vec3 next=F::ProjSim.GetOrigin();CGameTrace hit{};
-        SDK::TraceHull(previous,next,-info.m_vHull,info.m_vHull,MASK_SOLID,&filter,&hit);
-        if(hit.DidHit()) next=hit.endpos;
-        if(display&&display->trajectoryCount<int(display->trajectory.size())) display->trajectory[display->trajectoryCount++]=next;
-        if(hit.DidHit()) return Floor(hit)&&next.DistTo(point)<32.f;
-        previous=next;
-    }
-    return false;
-}
-bool CAutoStickyJump::Plan(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* cmd)
-{
-    Vec3 wish;Math::AngleVectors({0,G::OriginalCmd.viewangles.y,0},&wish);
-    const auto& original=G::OriginalCmd;
-    if(std::abs(original.forwardmove)+std::abs(original.sidemove)>5.f)
-    {
-        Vec3 right;Math::AngleVectors({0,original.viewangles.y,0},nullptr,&right);
-        wish=wish*original.forwardmove+right*original.sidemove;wish.Normalize();
-    }
-    if(m_flushHeading) wish=m_flushWish;
-    const float speed=local->m_vecVelocity().Length2D();
-    // Pick up the existing run instead of steering a fast player toward camera yaw.
-    if(AutoWalk.Value&&speed>30.f) wish=local->m_vecVelocity().Normalized2D();
-    const int wanted=std::clamp(Stickies.Value,1,2);
-    const float runSpeed=(std::max)(SDK::MaxSpeed(local,false),1.f);
-    float rotationLead=.08f;
-    if(Rotation.Value>=2)
-    {
-        const float rotationScale=std::clamp(RotationSpeed.Value/25.f,.45f,2.2f);
-        const float yaw=std::abs(Trolldier::WrapAngle(Math::VectorAngles(wish).y-G::OriginalCmd.viewangles.y));
-        rotationLead=(std::max)(yaw/(180.f*rotationScale),std::abs(35.f-G::OriginalCmd.viewangles.x)/(125.f*rotationScale))+.25f;
-    }
-    auto* net=I::EngineClient->GetNetChannelInfo();
-    const float confirmation=net?std::clamp(net->GetLatency(FLOW_INCOMING),0.f,.5f):0.f;
-    const float delay=confirmation+ArmTime(local,weapon)+(wanted-1)*(weapon->GetFireRate()+3.f*TICK_INTERVAL)+rotationLead+.25f
-        +(std::max)(0.f,weapon->m_flNextPrimaryAttack()-Time(local));
-    static auto accelerate=H::ConVars.FindVar("sv_accelerate");
-    const float acceleration=(accelerate?accelerate->GetFloat():10.f)*runSpeed*(std::max)(.1f,local->m_surfaceFriction());
-    const float distance=StickyJump::LeadDistance(speed,runSpeed,acceleration,delay,std::clamp(ApproachDistance.Value,32.f,512.f));
-    if(distance<0||distance>1400.f) return false;
-    Display plan;plan.wish=wish;
-    if(!Route(local,local->m_vecOrigin()+wish*distance,&plan)) return false;
-    const bool vertical=Mode.Value==ModeEnum::Vertical;
-    const float offsets[]={0,8,16,56,72,88,104};
-    CTraceFilterWorldAndPropsOnly filter(local);
-    float best=-1;Display selected;
-    for(int n=vertical?0:3;n<(vertical?3:7);++n)
-    {
-        const Vec3 point=plan.takeoff-wish*offsets[n];CGameTrace floor{};
-        SDK::Trace(point+Vec3(0,0,24),point-Vec3(0,0,64),MASK_SOLID,&filter,&floor);
-        if(!Floor(floor)) continue;
-        const Vec3 blast=floor.endpos+floor.plane.normal*2.f;
-        if(!SDK::VisPosWorld(local,local,blast,plan.takeoff+Vec3(0,0,28),MASK_SHOT)) continue;
-        const Vec3 force=plan.takeoff+Vec3(0,0,38)-blast;
-        const float radius=SDK::AttribHookValue(146.f,"mult_explosion_radius",weapon);
-        const float score=RocketJump::BoostScore(vertical?RocketJump::Mode::Vertical:RocketJump::Mode::Horizontal,
-            force.x,force.y,force.z,(std::max)(0.f,force.Length()-24.f),radius,wish.x,wish.y);
-        if(score<=best) continue;
-        Display candidate=plan;Vec3 angles;
-        if(!Shot(local,weapon,blast,angles,&candidate)) continue;
-        best=score;selected=candidate;selected.blast=blast;m_angles=angles;
-    }
-    if(best<0) return false;
-    m_baseline.clear();m_firstSeen.clear();
-    for(auto* entity:H::Entities.GetGroup(EntityEnum::LocalStickies)) m_baseline.insert(entity->GetRefEHandle().ToInt());
-    m_mode=Mode.Value;m_plan=selected;m_plan.wanted=std::clamp(Stickies.Value,1,2);m_plan.valid=true;m_started=Time(local);m_lastRelease=m_started;
-    m_lastShotCheck=m_started;m_aimOrigin=local->GetShootPos();
-    Stage(Phase::Shoot,m_started);return true;
-}
-bool CAutoStickyJump::Rotate(CUserCmd* cmd,const Vec3& target)
-{
-    const bool silent=Rotation.Value==RotationEnum::Silent||Rotation.Value==RotationEnum::SilentLegit;
-    const bool legit=Rotation.Value==RotationEnum::Legit||Rotation.Value==RotationEnum::SilentLegit;
-    if(!m_rotationValid||m_rotationMode!=Rotation.Value) {m_rotationMode=Rotation.Value;m_rotation=cmd->viewangles;m_pitchSpeed=m_yawSpeed=0;m_rotationValid=true;}
-    Vec3 angles=target;
-    if(legit)
-    {
-        const Vec3 from=silent?m_rotation:cmd->viewangles;
-        angles.x=Trolldier::SmoothRotation(from.x,target.x,TICK_INTERVAL,RotationSpeed.Value,true,m_pitchSpeed);
-        angles.y=Trolldier::SmoothRotation(from.y,target.y,TICK_INTERVAL,RotationSpeed.Value,false,m_yawSpeed);
-    }
-    Math::ClampAngles(angles);cmd->viewangles=m_rotation=angles;
-    if(silent) G::SilentAngles=true;else I::EngineClient->SetViewAngles(angles);
-    return std::abs(angles.x-target.x)<.6f&&std::abs(Trolldier::WrapAngle(angles.y-target.y))<.6f;
-}
-void CAutoStickyJump::Prepare(CTFPlayer* local,CTFWeaponBase* weapon,CUserCmd* cmd)
-{
-    const bool previousControl=Controls(cmd);
-    m_controlCommand=-1;
-    if(!Enabled.Value||!local||!weapon||!cmd||!I::GlobalVars||!local->IsAlive()||local->IsAGhost()
-        ||local->m_iClass()!=TF_CLASS_DEMOMAN||weapon->GetWeaponID()!=TF_WEAPON_PIPEBOMBLAUNCHER
-        ||!local->CanAttack()||local->IsSwimming()||local->IsTaunting()||local->m_MoveType()!=MOVETYPE_WALK
-        ||F::Menu.m_bIsOpen||I::EngineVGui->IsGameUIVisible()||I::EngineClient->IsPlayingDemo()||I::ClientState->IsPaused()||cmd->weaponselect
-        ||(G::OriginalCmd.buttons&(IN_ATTACK|IN_ATTACK2))) {Reset();return;}
-    if(m_owner.Get()!=local||m_weapon.Get()!=weapon||m_spawn!=local->m_iSpawnCounter())
-    {Reset();m_owner.Set(local);m_weapon.Set(weapon);m_spawn=local->m_iSpawnCounter();}
-    if(m_lastCommand==cmd->command_number)
-    {if(previousControl) m_controlCommand=cmd->command_number;Finalize(local,cmd);return;}
-    if(cmd->command_number<m_lastCommand) {Reset();return;}
-    m_lastCommand=cmd->command_number;
-    const float now=Time(local);const int wanted=std::clamp(Stickies.Value,1,2);
-    if(m_plan.valid&&(m_mode!=Mode.Value||wanted!=m_plan.wanted))
-    {Stage(Phase::Failed,now);Publish(0,"Settings changed - toggle to replan");return;}
-    if(m_phase==Phase::Done||m_phase==Phase::Failed) {Publish();return;}
-    if(m_phase==Phase::Air)
-    {
-        if(!local->IsOnGround()) m_airborne=true;
-        if(m_airborne&&local->IsOnGround())
+        const auto marker=[&](StickyJump::Vec position, const char* label, Color_t tint)
         {
-            if(Repeat.Value) {Reset();return;}Stage(Phase::Done,now);
-        }
-        if(now-m_phaseTime>12.f) Stage(Phase::Done,now);
-        Publish();return;
+            Vec3 screen;
+            if (!SDK::W2S(E(position)+Vec3{0,0,4},screen)) return;
+            H::Draw.Line(int(screen.x)-7,int(screen.y),int(screen.x)+7,int(screen.y),tint);
+            H::Draw.Line(int(screen.x),int(screen.y)-7,int(screen.x),int(screen.y)+7,tint);
+            H::Draw.String(font,int(screen.x),int(screen.y)+10,tint,ALIGN_TOP,label);
+        };
+        marker(display.plan.takeoff,"Takeoff",color);
     }
-    m_controlCommand=cmd->command_number;m_setButtons=0;m_clearButtons=IN_ATTACK|IN_ATTACK2|IN_RELOAD|IN_JUMP;
-    Vec3 inputForward,inputRight;Math::AngleVectors({0,G::OriginalCmd.viewangles.y,0},&inputForward,&inputRight);
-    m_worldMove=inputForward*G::OriginalCmd.forwardmove+inputRight*G::OriginalCmd.sidemove;
-    if(AutoWalk.Value&&m_plan.valid) m_worldMove=m_plan.wish*450.f;
-    const auto& projectiles=H::Entities.GetGroup(EntityEnum::LocalStickies);
-    if(!m_flushDone)
-    {
-        if(!FlushFirst.Value) m_flushDone=true;
-        else if(!Flush(local,weapon,cmd)) {Finalize(local,cmd);return;}
-    }
-    if(m_phase==Phase::Plan)
-    {
-        if(!local->IsOnGround()||local->IsDucking()) {m_controlCommand=-1;Publish(0,"Stand on the ground to plan");return;}
-        if(weapon->m_iClip1()>=0&&weapon->m_iClip1()<wanted)
-        {
-            if(local->GetAmmoCount(weapon->m_iPrimaryAmmoType())<weapon->GetAmmoPerShot())
-            {m_controlCommand=-1;Publish(0,"Not enough sticky ammunition");return;}
-            m_setButtons|=IN_RELOAD;Publish(0,"Loading the required sticky count");Finalize(local,cmd);return;
-        }
-        if(PreserveTraps.Value&&!projectiles.empty()) {m_controlCommand=-1;Publish(0,"Existing stickies - clear traps first");return;}
-        if(now-m_lastSearch>=.15f) {m_lastSearch=now;Plan(local,weapon,cmd);}
-        if(m_phase==Phase::Plan) {Publish(0,"No clear launch route / shot");Finalize(local,cmd);return;}
-    }
-    // Tickbase correction at the start of a charged burst can rewind the owner
-    // clock. Let it catch up; command regression and respawn are handled above.
-    if(now-m_started>10.f) {Stage(Phase::Failed,now);Publish(0,"Timed out - toggle to retry");Finalize(local,cmd);return;}
-    int seen=0;bool settled=true,armed=true,clear=true;float remaining=0,minRadius=FLT_MAX;Vec3 centre;
-    const float duration=ArmTime(local,weapon);
-    m_diagnostics.rawSpeed=0;
-    for(auto* entity:projectiles)
-    {
-        auto* sticky=entity->As<CTFGrenadePipebombProjectile>();
-        if(sticky->m_hOriginalLauncher().Get()!=weapon||m_baseline.contains(entity->GetRefEHandle().ToInt())) continue;
-        if(!sticky->HasStickyEffects()) continue;
-        ++seen;centre+=sticky->m_vecOrigin();
-        // The authoritative attachment flag freezes VPhysics. Network velocity
-        // can retain the old launch value and must not block a stuck bomb.
-        settled&=sticky->m_bTouched();
-        m_diagnostics.rawSpeed=(std::max)(m_diagnostics.rawSpeed,sticky->GetAbsVelocity().Length());
-        m_diagnostics.rawCreation=sticky->m_flCreationTime();
-        const float created=CreationTime(sticky,now);
-        armed&=StickyJump::Armed(now,created,duration,TICK_INTERVAL);
-        remaining=(std::max)(remaining,created+duration+TICK_INTERVAL-now);
-        minRadius=(std::min)(minRadius,sticky->GetDamageRadius());
-        const float radius=sticky->GetDamageRadius()-8.f;
-        Vec3 nearest;
-        reinterpret_cast<CCollisionProperty*>(local->GetCollideable())->CalcNearestPoint(sticky->m_vecOrigin(),&nearest);
-        // Match AutoDetonate's proven collision trace and hull-distance check.
-        Vec3 target=local->GetShootPos();
-        if(sticky->m_vecOrigin().DistTo(target)>radius) target=nearest;
-        clear&=sticky->m_vecOrigin().DistTo(nearest)<radius
-            &&SDK::VisPosCollideable(sticky,local,sticky->m_vecOrigin(),target,MASK_SOLID&~CONTENTS_GRATE);
-    }
-    m_plan.count=seen;m_diagnostics.attached=settled;m_diagnostics.armed=armed;m_diagnostics.clear=clear;
-    if(seen) centre/=float(seen);
-    if(m_phase==Phase::Wait&&seen==wanted&&(local->m_vecOrigin()-centre).Dot(m_plan.wish)>minRadius+32.f)
-    {Stage(Phase::Failed,now);Publish(remaining,"No confirmed blast corridor ahead");Finalize(local,cmd);return;}
-    if(m_phase==Phase::Shoot)
-    {
-        if(m_released>=wanted) Stage(Phase::Wait,now);
-        else
-        {
-            Vec3 aim=m_angles;
-            const bool releasing=m_chargeCommand>=0&&cmd->command_number>m_chargeCommand
-                &&weapon->As<CTFPipebombLauncher>()->m_flChargeBeginTime()>0;
-            const bool validate=releasing||now-m_lastShotCheck>=.1f;
-            if(validate||m_aimOrigin.DistToSqr(local->GetShootPos())>1.f)
-            {
-                if(!Shot(local,weapon,m_plan.blast,aim,validate?&m_plan:nullptr,validate)) {Stage(Phase::Failed,now);Publish(0,"Sticky shot became obstructed");Finalize(local,cmd);return;}
-                if(validate) m_lastShotCheck=now;
-                m_aimOrigin=local->GetShootPos();m_angles=aim;
-            }
-            const bool aligned=Rotate(cmd,aim);
-            if(m_chargeCommand>=0)
-            {
-                // One command presses attack; a subsequent command releases it.
-                if(StickyJump::ReleaseCharge(cmd->command_number,m_chargeCommand,weapon->As<CTFPipebombLauncher>()->m_flChargeBeginTime(),aligned))
-                {
-                    ++m_released;m_chargeCommand=-1;m_lastRelease=now;m_shotCommand=cmd->command_number;G::Attacking=1;
-                    m_fire.Release(now,weapon->GetFireRate(),weapon->m_iClip1());
-                    if(wanted==2&&Doubletap.Value&&!m_burstTried)
-                    {
-                        m_burstTried=true;
-                        const int ticks=StickyJump::BurstTicks(weapon->GetFireRate(),TICK_INTERVAL,F::Ticks.AvailableStickyJumpTicks());
-                        if(ticks&&F::Ticks.BeginStickyJumpBurst(ticks)) m_plan.burst=ticks;
-                    }
-                    if(m_released>=wanted) Stage(Phase::Wait,now);
-                }
-                else if(now-m_lastRelease>2.f) Stage(Phase::Failed,now);
-                else m_setButtons|=IN_ATTACK;
-            }
-            else if(aligned&&m_fire.Cleared(now,weapon->m_flNextPrimaryAttack(),weapon->As<CTFPipebombLauncher>()->m_flChargeBeginTime(),weapon->m_iClip1(),seen,m_released,TICK_INTERVAL)
-                &&m_fire.Ready(now,weapon->m_flNextPrimaryAttack(),weapon->As<CTFPipebombLauncher>()->m_flChargeBeginTime(),TICK_INTERVAL)
-                &&G::CanPrimaryAttack&&weapon->HasPrimaryAmmoForShot())
-            {m_setButtons|=IN_ATTACK;m_chargeCommand=cmd->command_number;m_lastRelease=now;}
-            else if(!weapon->HasPrimaryAmmoForShot())
-            {
-                if(local->GetAmmoCount(weapon->m_iPrimaryAmmoType())>=weapon->GetAmmoPerShot()) m_setButtons|=IN_RELOAD;
-                else Stage(Phase::Failed,now);
-            }
-        }
-    }
-    if(m_phase==Phase::Wait)
-    {
-        if(seen==wanted&&settled&&!F::Ticks.m_bShifting)
-        {
-            // Lock to observed sticky positions; do not jump at a purely simulated blast.
-            const Vec3 adjustment=centre-m_plan.blast;
-            if(adjustment.Length2D()>48.f||std::abs(adjustment.z)>24.f) Stage(Phase::Failed,now);
-            else {m_plan.takeoff+=Vec3(adjustment.x,adjustment.y,0);m_plan.blast=centre;Stage(Phase::Approach,now);}
-        }
-        else if(now-m_lastRelease>3.f)
-        {Stage(Phase::Failed,now);m_reason=seen<wanted?"Sticky not observed - toggle to retry":"Sticky did not attach - toggle to retry";}
-    }
-    if(AutoWalk.Value&&m_plan.valid) m_worldMove=m_plan.wish*450.f;
-    if(m_phase==Phase::Approach)
-    {
-        if(seen!=wanted||!settled) Stage(Phase::Failed,now);
-        else
-        {
-            const Vec3 velocity=local->m_vecVelocity();
-            const Vec3 travel{velocity.x,velocity.y,0};
-            const Vec3 origin=local->m_vecOrigin(),mins=local->m_vecMins();
-            const Vec3 maxs=I::GameMovement->GetPlayerMaxs(true)*local->m_flModelScale();
-            const float gravity=SDK::GetGravity();
-            const float jumpSpeed=std::sqrt((std::max)(0.f,gravity)*90.f);
-            const auto window=StickyJump::FindWindow(TICK_INTERVAL,remaining,[&](float time,float delay) {
-                const Vec3 at=origin+travel*(time+delay)+Vec3(0,0,jumpSpeed*delay-.5f*gravity*delay*delay);
-                float score=0;
-                for(auto* entity:projectiles)
-                {
-                    auto* sticky=entity->As<CTFGrenadePipebombProjectile>();
-                    if(sticky->m_hOriginalLauncher().Get()!=weapon||m_baseline.contains(entity->GetRefEHandle().ToInt())) continue;
-                    const Vec3 blast=sticky->m_vecOrigin();
-                    const Vec3 nearest=at+Vec3(std::clamp(blast.x-at.x,mins.x,maxs.x),std::clamp(blast.y-at.y,mins.y,maxs.y),std::clamp(blast.z-at.z,mins.z,maxs.z));
-                    const Vec3 force=at+(mins+maxs)*.5f+Vec3(0,0,10)-blast;
-                    const float value=RocketJump::BoostScore(Mode.Value==ModeEnum::Vertical?RocketJump::Mode::Vertical:RocketJump::Mode::Horizontal,
-                        force.x,force.y,force.z,nearest.DistTo(blast),sticky->GetDamageRadius()-8.f,m_plan.wish.x,m_plan.wish.y);
-                    if(value<=0) return 0.f;
-                    score+=value;
-                }
-                return score;
-            });
-            m_diagnostics.current=window.current;m_diagnostics.best=window.score;m_diagnostics.ahead=window.time;
-            // A stationary manual approach must not turn a weak distant blast
-            // into the optimum merely because every predicted position is identical.
-            const bool useful=travel.Length2DSqr()>1.f||window.score>=wanted*(Mode.Value==ModeEnum::Vertical?.65f:.55f);
-            if(window.valid&&useful)
-            {
-                m_plan.takeoff=origin+travel*window.time;m_reason=nullptr;
-                // Validate the selected route, not proximity to the old marker.
-                if(!Route(local,m_plan.takeoff,&m_plan)) {Stage(Phase::Failed,now);Publish(remaining,"Launch route blocked");Finalize(local,cmd);return;}
-            }
-            else if((origin-centre).Dot(m_plan.wish)>minRadius+32.f)
-            {Stage(Phase::Failed,now);Publish(remaining,"No armed blast corridor ahead");Finalize(local,cmd);return;}
-            const bool dot=weapon->As<CTFPipebombLauncher>()->GetDetonateType()==TF_DETONATE_MODE_DOT;
-            const bool aimReady=!dot||Rotate(cmd,Math::CalcAngle(local->GetShootPos(),centre));
-            // Pipebomb detonation is available in ItemBusyFrame while reloading.
-            // Generic CanSecondaryAttack also tests a busy-frame clock and can
-            // be false here even though the actual detonator is usable.
-            if(aimReady&&clear&&local->IsOnGround()&&!F::Ticks.m_bShifting&&useful&&window.Now(TICK_INTERVAL))
-            {m_setButtons|=IN_JUMP|IN_DUCK;m_jumpCommand=G::OriginalCmd.command_number;Stage(Phase::Jump,now);}
-        }
-    }
-    if(m_phase==Phase::Jump)
-    {
-        m_setButtons|=IN_DUCK;
-        if(weapon->As<CTFPipebombLauncher>()->GetDetonateType()==TF_DETONATE_MODE_DOT)
-            Rotate(cmd,Math::CalcAngle(local->GetShootPos(),centre));
-        if(cmd->command_number>m_jumpCommand&&!local->IsOnGround()&&local->m_vecVelocity().z>0&&armed&&clear&&seen==wanted)
-        {
-            const auto score=[&](int tick) {
-                const float time=TICKS_TO_TIME(tick);
-                Vec3 origin=local->m_vecOrigin()+local->m_vecVelocity()*time;
-                origin.z-=SDK::GetGravity()*time*time*.5f;
-                const Vec3 mins=local->m_vecMins(),maxs=I::GameMovement->GetPlayerMaxs(true)*local->m_flModelScale();
-                const Vec3 nearest=origin+Vec3(std::clamp(centre.x-origin.x,mins.x,maxs.x),std::clamp(centre.y-origin.y,mins.y,maxs.y),std::clamp(centre.z-origin.z,mins.z,maxs.z));
-                const Vec3 force=origin+(mins+maxs)*.5f+Vec3(0,0,10)-centre;
-                return RocketJump::BoostScore(Mode.Value==ModeEnum::Vertical?RocketJump::Mode::Vertical:RocketJump::Mode::Horizontal,
-                    force.x,force.y,force.z,nearest.DistTo(centre),minRadius,m_plan.wish.x,m_plan.wish.y);
-            };
-            const float current=score(0);float future=current;
-            for(int tick=1;tick<=3;++tick) future=(std::max)(future,score(tick));
-            if(StickyJump::DetonateWindow(current,future,cmd->command_number-m_jumpCommand))
-            {m_setButtons|=IN_ATTACK2;m_beforeBlastVelocity=local->m_vecVelocity();Stage(Phase::Blast,now);}
-        }
-        else if(now-m_phaseTime>.3f) Stage(Phase::Failed,now);
-    }
-    if(m_phase==Phase::Blast)
-    {
-        m_setButtons|=IN_DUCK;
-        if(!seen)
-        {
-            if(local->InCond(TF_COND_BLASTJUMPING)||(local->m_vecVelocity()-m_beforeBlastVelocity).LengthSqr()>1600.f)
-            {m_airborne=!local->IsOnGround();Stage(Phase::Air,now);}
-            else if(now-m_phaseTime>.3f) Stage(Phase::Failed,now);
-        }
-        else if(now-m_phaseTime>.75f) Stage(Phase::Failed,now);
-        else
-        {
-            if(weapon->As<CTFPipebombLauncher>()->GetDetonateType()==TF_DETONATE_MODE_DOT)
-                Rotate(cmd,Math::CalcAngle(local->GetShootPos(),centre));
-            m_setButtons|=IN_ATTACK2;
-        }
-    }
-    if(AutoWalk.Value&&m_plan.valid) m_worldMove=m_plan.wish*450.f;
-    Publish(remaining);Finalize(local,cmd);
-}
-void CAutoStickyJump::Finalize(CTFPlayer* local,CUserCmd* cmd)
-{
-    if(!Controls(cmd)) return;
-    cmd->buttons=(cmd->buttons&~m_clearButtons)|m_setButtons;
-    // Keep explicit shoot/detonate rotations after late movement/anti-aim helpers.
-    if(m_rotationValid) {cmd->viewangles=m_rotation;if(Rotation.Value==RotationEnum::Silent||Rotation.Value==RotationEnum::SilentLegit) G::SilentAngles=true;else I::EngineClient->SetViewAngles(m_rotation);}
-    {
-        Vec3 forward,right;Math::AngleVectors({0,cmd->viewangles.y,0},&forward,&right);
-        cmd->forwardmove=std::clamp(m_worldMove.Dot(forward),-450.f,450.f);
-        cmd->sidemove=std::clamp(m_worldMove.Dot(right),-450.f,450.f);
-    }
-
-}
-
-void CAutoStickyJump::AfterNoSpread(CUserCmd* cmd)
-{
-    if(Controls(cmd)&&StickyJump::OwnsCommand(m_shotCommand,G::OriginalCmd.command_number)) m_rotation=cmd->viewangles;
+#endif
 }

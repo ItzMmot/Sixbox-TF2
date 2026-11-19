@@ -1,5 +1,4 @@
 #include "Aimbot.h"
-#include "AutoStickyJump/AutoStickyJump.h"
 #include "AutoTrolldier/AutoTrolldier.h"
 
 #include "AimbotHitscan/AimbotHitscan.h"
@@ -106,7 +105,6 @@ void CAimbot::RunMain(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 	if (abs(G::AimPoint.m_iTickCount - I::GlobalVars->tickcount) > G::AimPoint.m_iDuration)
 		G::AimPoint = {};
 
-	if(F::AutoStickyJump.Controls(pCmd)) return;
     F::AutoRocketJump.Run(pLocal, pWeapon, pCmd);
 	if (F::AutoRocketJump.IsRunning())
 		return;
@@ -155,7 +153,7 @@ void CAimbot::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 	RunMain(pLocal, pWeapon, pCmd);
 
 #ifndef TEXTMODE
-	if (!F::AutoStickyJump.Controls(pCmd)&&(G::PrimaryWeaponType == EWeaponType::PROJECTILE || G::SecondaryWeaponType == EWeaponType::PROJECTILE))
+	if (G::PrimaryWeaponType == EWeaponType::PROJECTILE || G::SecondaryWeaponType == EWeaponType::PROJECTILE)
 		F::AimbotProjectile.RunPreview(pLocal, pWeapon);
 #endif
 

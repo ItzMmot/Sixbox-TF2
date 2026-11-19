@@ -1,5 +1,5 @@
 #include "../SDK/SDK.h"
-#include "../Features/Misc/StickyJumpControl/StickyJumpControl.h"
+#include "../Features/Aimbot/AutoStickyJump/AutoStickyJump.h"
 
 #include "../Features/Visuals/ESP/ESP.h"
 #include "../Features/Visuals/OffscreenArrows/OffscreenArrows.h"
@@ -71,7 +71,7 @@ MAKE_HOOK(IEngineVGui_Paint, U::Memory.GetVirtual(I::EngineVGui, 14), void,
 			if (pLocal)
 			{
 				F::CameraWindow.Draw();
-				F::StickyJumpControl.Draw();
+				F::AutoStickyJump.Draw();
 
 				F::AntiAim.Draw(pLocal);
 				F::Visuals.DrawPickupTimers();

@@ -9,7 +9,6 @@
 #include "../Aimbot/AutoTrolldier/AutoTrolldier.h"
 #include "../Aimbot/AutoRocketJump/AutoRocketJump.h"
 #include "../Aimbot/AutoStickyJump/AutoStickyJump.h"
-#include "../Misc/StickyJumpControl/StickyJumpControl.h"
 
 #include "../Aimbot/Aimbot.h"
 #include "../Backtrack/Backtrack.h"
@@ -74,10 +73,9 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	if (!pLocal)
 	{
 		F::AutoDodge.Reset();
-		F::StickyJumpControl.Reset();
+		F::AutoStickyJump.Reset();
 		F::SpyKnife.Reset(true);
 		F::AutoRocketJump.Reset();
-        F::AutoStickyJump.Reset();
 		F::AutoTrolldier.Reset();
 #ifndef TEXTMODE
         F::JumpCoach.Reset();
@@ -104,10 +102,9 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	F::Backtrack.CreateMove(pLocal, pWeapon, pCmd);
 
 	F::AutoDodge.Prepare(pLocal, pCmd);
-	F::StickyJumpControl.Prepare(pLocal, pWeapon, pCmd);
-	if (F::StickyJumpControl.Controls(pCmd))
+	F::AutoStickyJump.Prepare(pLocal, pWeapon, pCmd);
+	if (F::AutoStickyJump.Controls(pCmd))
 	{
-		F::AutoStickyJump.Reset();
 		F::AutoRocketJump.Reset();
 		F::AutoTrolldier.Reset();
 		F::SpyKnife.Reset(true);
@@ -115,17 +112,15 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	else
 	{
 		F::AutoRocketJump.Prepare(pLocal, pWeapon, pCmd);
-		if (F::AutoDodge.Controls(pCmd)) F::AutoStickyJump.Reset();
-		else F::AutoStickyJump.Prepare(pLocal,pWeapon,pCmd);
 		F::AutoTrolldier.UpdateAutomation(pLocal, pWeapon, pCmd);
 		F::AutoTrolldier.Prepare(pLocal, pWeapon, pCmd);
 		F::SpyKnife.Prepare(pLocal,pWeapon,pCmd);
 	}
-	F::StickyJumpControl.Apply(pLocal,pCmd);
+	F::AutoStickyJump.Apply(pLocal,pCmd);
 	F::Ticks.BeginBurstCommand(pLocal, pWeapon, pCmd);
 	F::Ticks.Start(pLocal, pCmd);
 	{
-		if (!F::StickyJumpControl.Controls(pCmd) && !F::AutoTrolldier.SuppressCombat())
+		if (!F::AutoStickyJump.Controls(pCmd) && !F::AutoTrolldier.SuppressCombat())
 			F::Aimbot.Run(pLocal, pWeapon, pCmd);
 		F::AutoTrolldier.AfterAim(pLocal, pWeapon, pCmd);
 		F::Ticks.EnforceBurstCommand(pLocal, pWeapon, pCmd);
@@ -133,7 +128,7 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 	F::Ticks.End(pLocal, pCmd);
 	F::SpyKnife.AfterAim(pLocal,pWeapon,pCmd);
 	{
-		if (!F::StickyJumpControl.Controls(pCmd)&&!F::AutoDodge.Controls(pCmd)&&!F::AutoTrolldier.IsActive(pCmd)&&!F::SpyKnife.Controls(pCmd)&&!F::AutoStickyJump.Controls(pCmd))
+		if (!F::AutoStickyJump.Controls(pCmd)&&!F::AutoDodge.Controls(pCmd)&&!F::AutoTrolldier.IsActive(pCmd)&&!F::SpyKnife.Controls(pCmd))
 		{
 			F::FollowBot.Run(pLocal, pCmd);
 			F::NavBotCore.Run(pLocal, pWeapon, pCmd);
@@ -142,10 +137,9 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 			F::ZIController.CreateMove(pLocal, pCmd);
 			F::BotUtils.HandleSmartJump(pLocal, pCmd);
 		}
-		if (!F::StickyJumpControl.Controls(pCmd)) F::CritHack.Run(pLocal, pWeapon, pCmd);
+		if (!F::AutoStickyJump.Controls(pCmd)) F::CritHack.Run(pLocal, pWeapon, pCmd);
 		F::CritHack.CacheDrawInfo(pLocal);
 		F::NoSpread.Run(pLocal, pWeapon, pCmd);
-        F::AutoStickyJump.AfterNoSpread(pCmd);
 		F::Misc.RunPost(pLocal, pCmd);
 		if (!F::AutoDodge.Controls(pCmd)) F::Misc.AutoFaNJump(pLocal, pWeapon, pCmd);
 		F::AutoTrolldier.RotateCamera(pLocal, pCmd);
@@ -153,8 +147,7 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 		F::SpyKnife.ApplyMovement(pLocal,pWeapon,pCmd);
 		const bool dodging = F::AutoDodge.Controls(pCmd);
 		F::AutoDodge.Prepare(pLocal, pCmd, true);
-        if (F::AutoDodge.Controls(pCmd)) F::StickyJumpControl.Reset();
-        if(F::AutoDodge.Controls(pCmd)) F::AutoStickyJump.Reset();
+        if (F::AutoDodge.Controls(pCmd)) F::AutoStickyJump.Reset();
 		F::AutoDodge.ApplyMovement(pCmd);
 		if (!dodging && F::AutoDodge.Controls(pCmd))
 		{
@@ -168,8 +161,7 @@ void CCreateMove::Run(int nSequenceNum, float flInputSampleFrametime)
 		F::AntiCheatCompatibility.CreateMove(pCmd);
 		F::SpyKnife.Finalize(pLocal,pWeapon,pCmd);
 		F::AutoDodge.ApplyMovement(pCmd);
-        F::AutoStickyJump.Finalize(pLocal,pCmd);
-		F::StickyJumpControl.Apply(pLocal,pCmd);
+		F::AutoStickyJump.Apply(pLocal,pCmd);
 		F::Resolver.CommitShot(pLocal,pWeapon,pCmd);
 		
 #ifndef TEXTMODE

@@ -1,8 +1,4 @@
 #include "JumpCoach.h"
-#include "../../Aimbot/AutoStickyJump/AutoStickyJump.h"
-#ifndef TEXTMODE
-#include "../Sandevistan/Sandevistan.h"
-#endif
 #ifndef TEXTMODE
 #include "../../Aimbot/AutoRocketJump/AutoRocketJump.h"
 #include "../../Aimbot/AutoTrolldier/AutoTrolldier.h"
@@ -42,8 +38,7 @@ JumpCoach::Trace CJumpCoach::Trace(void* context,JumpCoach::Vector from,JumpCoac
 void CJumpCoach::Update(CTFPlayer* local,CTFWeaponBase* weapon,const CUserCmd* cmd)
 {
     using namespace Vars::Misc::Movement::JumpCoach;
-    const bool sticky=F::AutoStickyJump.FlightPreview();
-    if((!Enabled.Value&&!sticky) || !local || !cmd || G::Unload || !I::GlobalVars || !local->IsAlive() || local->IsAGhost()
+    if(!Enabled.Value || !local || !cmd || G::Unload || !I::GlobalVars || !local->IsAlive() || local->IsAGhost()
         || I::EngineClient->IsPlayingDemo() || I::ClientState->IsPaused() || I::EngineVGui->IsGameUIVisible()
         || local->m_MoveType()!=MOVETYPE_WALK || local->IsSwimming() || local->IsTaunting()
         || local->InCond(TF_COND_SHIELD_CHARGE) || local->InCond(TF_COND_PARACHUTE_ACTIVE)
@@ -51,7 +46,7 @@ void CJumpCoach::Update(CTFPlayer* local,CTFWeaponBase* weapon,const CUserCmd* c
         || local->InCond(TF_COND_AIR_CURRENT) || local->InCond(TF_COND_ROCKETPACK)
         || local->m_hGrapplingHookTarget().Get() || local->m_flWaterJumpTime()>0
         || !local->m_vecBaseVelocity().IsZero() || F::Ticks.m_bShifting || F::Ticks.m_bWarp
-        || F::Ticks.m_bRecharge || (SoldierOnly.Value && !sticky && local->m_iClass()!=TF_CLASS_SOLDIER))
+        || F::Ticks.m_bRecharge || (SoldierOnly.Value && local->m_iClass()!=TF_CLASS_SOLDIER))
     {Reset();return;}
     if(m_owner.Get()!=local || cmd->command_number<m_command || int64_t(cmd->command_number)>int64_t(m_command)+8)
     {Reset();m_owner.Set(local);}
@@ -93,7 +88,7 @@ void CJumpCoach::Update(CTFPlayer* local,CTFWeaponBase* weapon,const CUserCmd* c
     display.hudY=std::isfinite(HUDY.Value)?std::clamp(HUDY.Value,0.f,100.f):70.f;
     display.scale=std::isfinite(HUDScale.Value)?std::clamp(HUDScale.Value,.6f,1.6f):1.f;
     display.markerRadius=std::clamp((body.maxs.x-body.mins.x+body.maxs.y-body.mins.y)*.25f,8.f,80.f);
-    display.automated=sticky || F::AutoTrolldier.IsActive(cmd) || Vars::Misc::Movement::AutoStrafe.Value!=0;
+    display.automated=F::AutoTrolldier.IsActive(cmd) || Vars::Misc::Movement::AutoStrafe.Value!=0;
     const float now=TICKS_TO_TIME(local->m_nTickBase());
     if(display.grounded)
     {
@@ -259,7 +254,6 @@ void CJumpCoach::RocketAdvice(CTFPlayer* local,CTFWeaponBase* weapon,const CUser
 }
 void CJumpCoach::RenderWorld()
 {
-    RenderStickyPlan();
     const auto data=m_display.Get();
     const uint64_t now=GetTickCount64();
     if(!data.active || now>data.expires || SDK::CleanScreenshot() || I::EngineVGui->IsGameUIVisible())
@@ -324,7 +318,6 @@ void CJumpCoach::RenderWorld()
 }
 void CJumpCoach::DrawHUD()
 {
-    DrawStickyHUD();
     const auto data=m_display.Get();
     if(!data.active || !data.showHUD || GetTickCount64()>data.expires) return;
     ImDrawList* draw=ImGui::GetBackgroundDrawList();
@@ -425,56 +418,5 @@ void CJumpCoach::DrawHUD()
         label(x+pad,row,buffer,data.rocket==RocketState::Now?accent:muted,hintSize);row+=line;
     }
     label(x+pad,row,"Estimate: hold current input and yaw",muted,hintSize);
-}
-#endif
-#ifndef TEXTMODE
-void CJumpCoach::RenderStickyPlan()
-{
-    using namespace Vars::Misc::Movement::AutoStickyJump;
-    const auto plan=F::AutoStickyJump.Snapshot();
-    if(!plan.active||!plan.valid||GetTickCount64()>plan.expires||SDK::CleanScreenshot()||I::EngineVGui->IsGameUIVisible()) return;
-    const bool depth=!ThroughWalls.Value;
-    const float scale=std::clamp(MarkerScale.Value,.5f,2.f);
-    if(DrawPath.Value)
-    {
-        for(int i=1;i<plan.approachCount;++i) H::Draw.RenderLine(plan.approach[i-1],plan.approach[i],PathColor.Value,depth);
-        if(plan.approachCount) H::Draw.RenderLine(plan.approach[plan.approachCount-1],plan.takeoff+Vec3(0,0,2),PathColor.Value,depth);
-    }
-    if(DrawTrajectory.Value)
-        for(int i=1;i<plan.trajectoryCount;++i) H::Draw.RenderLine(plan.trajectory[i-1],plan.trajectory[i],ShotColor.Value,depth);
-    const Vec3 p=plan.takeoff+Vec3(0,0,2),side{-plan.wish.y,plan.wish.x,0};
-    const auto color=LaunchColor.Value;
-    for(int n=0;n<32;++n)
-    {
-        const float a=n*3.141592654f/16.f,b=(n+1)*3.141592654f/16.f;
-        H::Draw.RenderLine(p+Vec3(std::cos(a),std::sin(a),0)*18.f*scale,p+Vec3(std::cos(b),std::sin(b),0)*18.f*scale,color,depth);
-    }
-    if(DrawArrow.Value)
-    {
-        const bool vertical=Mode.Value==ModeEnum::Vertical;
-        const Vec3 direction=vertical?Vec3(0,0,1):plan.wish;
-        const Vec3 tip=p+direction*42.f*scale;
-        H::Draw.RenderLine(p,tip,color,depth);
-        H::Draw.RenderLine(tip,tip-direction*12.f*scale+side*8.f*scale,color,depth);
-        H::Draw.RenderLine(tip,tip-direction*12.f*scale-side*8.f*scale,color,depth);
-    }
-    if(DrawSilhouette.Value)
-    {
-        Vec3 angles=Math::VectorAngles(plan.wish);angles.x=angles.z=0;
-        Color_t tint=color;tint.a=uint8_t(color.a*.55f);
-        F::Sandevistan.RenderPreview(plan.takeoff,angles,scale,tint,!depth);
-    }
-}
-void CJumpCoach::DrawStickyHUD()
-{
-    using namespace Vars::Misc::Movement::AutoStickyJump;
-    const auto plan=F::AutoStickyJump.Snapshot();
-    if(!Vars::Misc::Movement::AutoStickyJump::DrawHUD.Value||!plan.active||GetTickCount64()>plan.expires||SDK::CleanScreenshot()) return;
-    const auto screen=ImGui::GetIO().DisplaySize;
-    char text[256];std::snprintf(text,sizeof(text),"Sticky jump | %s | %d/%d | arm %.2fs | burst %d ticks",plan.status,plan.count,plan.wanted,plan.armRemaining,plan.burst);
-    const auto size=ImGui::CalcTextSize(text);const ImVec2 pos{(screen.x-size.x)*.5f,screen.y*.82f};
-    auto* draw=ImGui::GetBackgroundDrawList();
-    draw->AddRectFilled({pos.x-10,pos.y-6},{pos.x+size.x+10,pos.y+size.y+6},IM_COL32(17,20,28,215),6);
-    const auto c=LaunchColor.Value;draw->AddText(pos,IM_COL32(c.r,c.g,c.b,c.a),text);
 }
 #endif

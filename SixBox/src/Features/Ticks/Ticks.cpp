@@ -1,5 +1,4 @@
 #include "Ticks.h"
-#include "../Misc/StickyJumpControl/StickyJumpControl.h"
 #include "../Misc/AutoDodge/AutoDodge.h"
 #include "../Aimbot/AutoStickyJump/AutoStickyJump.h"
 #include "../Aimbot/SpyKnife/KnifePolicy.h"
@@ -75,8 +74,7 @@ void CTicks::StopKnifeWarp()
 
 void CTicks::Recharge(CTFPlayer* pLocal)
 {
-    if (F::StickyJumpControl.Busy()) { m_bRecharge=false; return; }
-    if(F::AutoStickyJump.Busy()) {m_bRecharge=false;return;}
+    if (F::AutoStickyJump.Busy()) { m_bRecharge=false; return; }
 	if (!m_bGoalReached)
 		return;
 
@@ -107,8 +105,7 @@ void CTicks::Recharge(CTFPlayer* pLocal)
 
 void CTicks::Warp()
 {
-    if (F::StickyJumpControl.Busy()) return;
-    if(F::AutoStickyJump.Busy()) return;
+    if (F::AutoStickyJump.Busy()) return;
 	if (!m_bGoalReached)
 		return;
 
@@ -123,8 +120,8 @@ void CTicks::Warp()
 
 void CTicks::Doubletap(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
-    if (F::StickyJumpControl.Controls(pCmd)) return;
-	if (F::AutoDodge.Controls(pCmd) || F::AutoTrolldier.IsActive(pCmd) || F::AutoStickyJump.Controls(pCmd))
+    if (F::AutoStickyJump.Controls(pCmd)) return;
+	if (F::AutoDodge.Controls(pCmd) || F::AutoTrolldier.IsActive(pCmd))
 		return;
 	if (!m_bGoalReached)
 		return;
@@ -168,7 +165,7 @@ void CTicks::CancelBurst()
 
 void CTicks::BeginBurstCommand(CTFPlayer* local, CTFWeaponBase* weapon, CUserCmd* command)
 {
-    if (F::StickyJumpControl.Controls(command)) { CancelBurst(); return; }
+    if (F::AutoStickyJump.Controls(command)) { CancelBurst(); return; }
 	m_bBurstWithheld = false;
 	if (!m_burstSchedule.valid) return;
 	auto* target = m_hBurstTarget.Get();
@@ -246,7 +243,7 @@ void CTicks::AntiWarp(CTFPlayer* pLocal, float flYaw, float& flForwardMove, floa
 }
 void CTicks::AntiWarp(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
-    if (F::StickyJumpControl.Controls(pCmd)) return;
+    if (F::AutoStickyJump.Controls(pCmd)) return;
 	if (m_bAntiWarp)
 		AntiWarp(pLocal, pCmd->viewangles.y, pCmd->forwardmove, pCmd->sidemove);
 	else
@@ -548,7 +545,7 @@ void CTicks::ManagePacket(CUserCmd* pCmd)
 void CTicks::Start(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
 	Vec2 vOriginalMove; int iOriginalButtons;
-	if (m_bPredictAntiwarp = !F::StickyJumpControl.Controls(pCmd) && !F::AutoDodge.Controls(pCmd) && !F::AutoStickyJump.Controls(pCmd) && (m_bAntiWarp || GetTicks(H::Entities.GetWeapon()) && Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity()))
+	if (m_bPredictAntiwarp = !F::AutoStickyJump.Controls(pCmd) && !F::AutoDodge.Controls(pCmd) && (m_bAntiWarp || GetTicks(H::Entities.GetWeapon()) && Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity()))
 	{
 		vOriginalMove = { pCmd->forwardmove, pCmd->sidemove };
 		iOriginalButtons = pCmd->buttons;
@@ -588,13 +585,13 @@ bool CTicks::CanChoke(bool bCanShift)
 
 int CTicks::GetTicks(CTFWeaponBase* pWeapon)
 {
-    if (F::StickyJumpControl.Busy()) return 0;
+    if (F::AutoStickyJump.Busy()) return 0;
 	if (F::AutoDodge.Controls(G::CurrentUserCmd)) return 0;
 	if (m_bDoubletap && m_iShiftedGoal < m_iShiftedTicks)
 		return m_iShiftedTicks - m_iShiftedGoal;
 
 	if (!Vars::Doubletap::Doubletap.Value
-		|| m_iWait || m_bWarp || m_bRecharge || F::AutoRocketJump.IsRunning() || F::AutoStickyJump.Busy())
+		|| m_iWait || m_bWarp || m_bRecharge || F::AutoRocketJump.IsRunning())
 		return 0;
 
 	int iTicks = std::min(m_iShiftedTicks + 1, 22);
