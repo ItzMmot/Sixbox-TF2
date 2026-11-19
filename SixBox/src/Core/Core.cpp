@@ -4,6 +4,7 @@
 #include "../Features/Players/SteamProfileCache.h"
 #include "../Features/Misc/TelemetryBlocker/TelemetryBlocker.h"
 #include "../Features/Misc/AutoDodge/AutoDodge.h"
+#include "../Features/Misc/StickyJumpControl/StickyJumpControl.h"
 
 #include "../SDK/SDK.h"
 #include "../BytePatches/BytePatches.h"
@@ -296,6 +297,7 @@ void CCore::Unload()
 	F::Visuals.RemoveUni();
 #endif
 	F::AutoDodge.Unload();
+	F::StickyJumpControl.Unload();
 	F::EnginePrediction.Unload();
 	H::ConVars.Restore();
 	if (m_bFailed2)

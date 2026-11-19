@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include "../Shared/StickyJumpMath.h"
 
 namespace StickyJump
 {
@@ -31,45 +32,13 @@ namespace StickyJump
         return std::isfinite(nowScore)&&std::isfinite(futureScore)&&nowScore>0
             &&(nowScore>=futureScore*.98f||ageTicks>=7);
     }
-    inline float LeadDistance(float speed,float runSpeed,float acceleration,float delay,float minimum)
-    {
-        if(!std::isfinite(speed)||!std::isfinite(runSpeed)||!std::isfinite(acceleration)||!std::isfinite(delay)||!std::isfinite(minimum)
-            ||speed<0||runSpeed<=0||acceleration<=0||delay<0) return -1;
-        // Acceleration only; the planner never requests a lower ground speed.
-        const float ramp=std::clamp((runSpeed-speed)/acceleration,0.f,delay);
-        const float distance=speed*ramp+.5f*acceleration*ramp*ramp+(std::max)(speed,runSpeed)*(delay-ramp);
-        return (std::max)(minimum,distance);
-    }
+    using StickyJumpMath::LeadDistance;
     inline float CreationTime(float raw,float now,float started,float observed,bool old)
     {
         return std::isfinite(raw)&&raw>0&&raw<=now+.25f&&(old||raw>=started-.5f)?raw:observed;
     }
-    struct LaunchWindow
-    {
-        float time=0,score=0,current=0;
-        bool valid=false;
-        bool Now(float interval) const {return valid&&time<=interval&&current>0&&current>=score*.94f;}
-    };
-    // Search continuous blast geometry, not a seven-HU distance to a fixed marker.
-    // Half-tick samples cover a window crossed between two commands.
-    template<class Score> LaunchWindow FindWindow(float interval,float armRemaining,Score&& score)
-    {
-        LaunchWindow result;
-        if(!std::isfinite(interval)||interval<=0||!std::isfinite(armRemaining)) return result;
-        const float delay=interval*2.f;
-        const float horizon=std::clamp(armRemaining+.2f,.5f,2.f);
-        const int steps=(std::min)(512,int(std::ceil(horizon/(interval*.5f))));
-        for(int i=0;i<=steps;++i)
-        {
-            const float time=i*interval*.5f;
-            if(time+delay+1e-5f<armRemaining) continue;
-            const float value=score(time,delay);
-            if(i==0&&std::isfinite(value)) result.current=value;
-            if(std::isfinite(value)&&value>result.score)
-                {result.time=time;result.score=value;result.valid=value>0;}
-        }
-        return result;
-    }
+    using StickyJumpMath::LaunchWindow;
+    using StickyJumpMath::FindWindow;
     struct FlushGate
     {
         bool hadStickies=false;

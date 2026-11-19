@@ -1034,6 +1034,15 @@ NAMESPACE_BEGIN(Vars)
 				VA_LIST("Diagonal", "Vertical", "Horizontal"), Diagonal, Vertical, Horizontal);
 			CVar(AutoRocketJumpWalls, "Wall rocket jumps", false);
 			CVar(AutoRocketJumpWallDistance, "Wall search distance", 112.f, SLIDER_CLAMP, 32.f, 160.f, 4.f, "%g HU");
+            NAMESPACE_BEGIN(StickyJumpControl)
+                CVar(Enabled, "Sticky Jump Control", false);
+                CVar(StartKey, "Sticky control start / cancel", 0, NOBIND);
+                CVar(Power, "Sticky control power", 50.f, SLIDER_CLAMP, 0.f, 100.f, 1.f, "%g%%");
+                CVarEnum(Direction, "Sticky control direction", 1, NONE, nullptr,
+                    VA_LIST("Horizontal", "Diagonal", "Vertical", "Auto"), Horizontal, Diagonal, Vertical, Auto);
+                CVar(DrawStatus, "Sticky control status", true, VISUAL);
+                CVar(DrawMarkers, "Sticky control markers", true, VISUAL);
+            NAMESPACE_END(StickyJumpControl)
             NAMESPACE_BEGIN(AutoStickyJump)
                 CVar(Enabled, "Auto sticky jump", false);
                 CVarEnum(Mode, "Sticky jump mode", 0, NONE, nullptr, VA_LIST("Horizontal", "Vertical"), Horizontal, Vertical);

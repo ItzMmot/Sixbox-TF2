@@ -465,6 +465,7 @@
     <ClCompile Include="src\Features\Aimbot\AutoAirblast\AutoAirblast.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoDetonate\AutoDetonate.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoRocketJump\AutoRocketJump.cpp" />
+    <ClCompile Include="src\Features\Misc\StickyJumpControl\StickyJumpControl.cpp" />
     <ClCompile Include="src\Features\Misc\AutoDodge\AutoDodge.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoStickyJump\AutoStickyJump.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoTrolldier\AutoTrolldier.cpp" />
@@ -749,6 +750,7 @@
     <ClInclude Include="src\Features\Aimbot\Shared\SplashWindow.h" />
     <ClInclude Include="src\Features\Aimbot\Shared\AnimationTimeline.h" />
     <ClInclude Include="src\Features\Aimbot\Shared\StickySearch.h" />
+    <ClInclude Include="src\Features\Aimbot\Shared\StickyJumpMath.h" />
     <ClInclude Include="src\Features\Resolver\AnimationPose.h" />
     <ClInclude Include="src\Features\Aimbot\AimbotHitscan\AimbotHitscan.h" />
     <ClInclude Include="src\Features\Aimbot\AimbotMelee\AimbotMelee.h" />
@@ -759,6 +761,9 @@
     <ClInclude Include="src\Features\Aimbot\AutoAirblast\AutoAirblast.h" />
     <ClInclude Include="src\Features\Aimbot\AutoDetonate\AutoDetonate.h" />
     <ClInclude Include="src\Features\Aimbot\AutoRocketJump\AutoRocketJump.h" />
+    <ClInclude Include="src\Features\Misc\StickyJumpControl\StickyJumpControl.h" />
+    <ClInclude Include="src\Features\Misc\StickyJumpControl\JumpController.h" />
+    <ClInclude Include="src\Features\Misc\StickyJumpControl\JumpSolver.h" />
     <ClInclude Include="src\Features\Aimbot\AutoStickyJump\AutoStickyJump.h" />
     <ClInclude Include="src\Features\Aimbot\AutoStickyJump\StickyJumpPolicy.h" />
     <ClInclude Include="src\Features\Aimbot\AutoRocketJump\JumpPolicy.h" />

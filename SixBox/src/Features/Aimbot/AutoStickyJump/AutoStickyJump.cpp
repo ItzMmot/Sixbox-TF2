@@ -157,12 +157,8 @@ bool CAutoStickyJump::Shot(CTFPlayer* local,CTFWeaponBase* weapon,const Vec3& po
     {
         if(!F::ProjSim.GetInfo(local,weapon,angle,info,ProjSimEnum::InitCheck|ProjSimEnum::NoRandomAngles)) return false;
         const Vec3 delta=point-info.m_vPos;
-        const float distance=delta.Length2D(),speed=std::hypot(info.m_flVelocity,200.f),g=info.m_flGravity;
-        if(distance<1.f||speed<=0||g<=0) return false;
-        const float squared=speed*speed,disc=squared*squared-g*(g*distance*distance+2.f*delta.z*squared);
-        if(disc<0||!std::isfinite(disc)) return false;
         angle=Math::CalcAngle(info.m_vPos,point);
-        angle.x=(-std::atan((squared-std::sqrt(disc))/(g*distance))+std::atan2(200.f,info.m_flVelocity))*180.f/3.141592654f;
+        if(!StickyJumpMath::LowArc(delta.Length2D(),delta.z,info.m_flVelocity,info.m_flGravity,angle.x)) return false;
         Math::ClampAngles(angle);
     }
     if(!validate) return true;

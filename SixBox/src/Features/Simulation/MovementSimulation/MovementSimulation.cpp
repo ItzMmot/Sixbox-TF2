@@ -5,7 +5,21 @@
 #include <numeric>
 #include <cstring>
 
-CScopedLocalMovement::CScopedLocalMovement(CTFPlayer* player, bool predictionBase) :
+CScopedLocalMovement::Snapshot CScopedLocalMovement::Capture(CTFPlayer* player)
+{
+	Snapshot snapshot;
+	auto map = player->GetPredDescMap();
+	const size_t size = player->GetIntermediateDataSize();
+	if (!map || !size || size > 1024 * 1024) return snapshot;
+	snapshot.player.resize(size);
+	CPredictionCopy save = { PC_EVERYTHING, snapshot.player.data(), PC_DATA_PACKED, player, PC_DATA_NORMAL };
+	save.TransferData("LocalSnapshotSave", player->entindex(), map);
+	std::memcpy(snapshot.movement.data(), I::GameMovement, snapshot.movement.size());
+	snapshot.clock = *I::GlobalVars;
+	return snapshot;
+}
+
+CScopedLocalMovement::CScopedLocalMovement(CTFPlayer* player, bool predictionBase, const Snapshot* snapshot) :
 	m_player(player), m_map(player->GetPredDescMap()), m_clock(*I::GlobalVars),
 	m_oldCommand(player->m_pCurrentCommand()), m_absolute(player->GetAbsOrigin()),
 	m_velocity(player->GetAbsVelocity()), m_inPrediction(I::Prediction->m_bInPrediction),
@@ -20,7 +34,18 @@ CScopedLocalMovement::CScopedLocalMovement(CTFPlayer* player, bool predictionBas
 	CPredictionCopy save = { PC_EVERYTHING, m_saved.data(), PC_DATA_PACKED, player, PC_DATA_NORMAL };
 	save.TransferData("LocalCommandSave", player->entindex(), m_map);
 	if (predictionBase && !F::EnginePrediction.RestoreSimulationBase(player)) return;
+	if (snapshot)
+	{
+		if (snapshot->player.size() != size) return;
+		CPredictionCopy restore = { PC_EVERYTHING, player, PC_DATA_NORMAL, const_cast<byte*>(snapshot->player.data()), PC_DATA_PACKED };
+		restore.TransferData("LocalSnapshotRestore", player->entindex(), m_map);
+		*I::GlobalVars = snapshot->clock;
+		std::memcpy(reinterpret_cast<byte*>(I::GameMovement) + sizeof(void*),
+			snapshot->movement.data() + sizeof(void*), snapshot->movement.size() - sizeof(void*));
+		std::memcpy(m_baseMovement.data(), I::GameMovement, m_baseMovement.size());
+	}
 	player->SetAbsOrigin(player->m_vecOrigin());
+	player->SetAbsVelocity(player->m_vecVelocity());
 	CPredictionCopy base = { PC_EVERYTHING, m_base.data(), PC_DATA_PACKED, player, PC_DATA_NORMAL };
 	base.TransferData("LocalCommandBase", player->entindex(), m_map);
 	m_baseTick = player->m_nTickBase();

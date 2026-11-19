@@ -107,7 +107,14 @@ class CScopedLocalMovement
 	bool m_inPrediction, m_first, m_valid = false;
 	int m_buttons = 0, m_tick = 0, m_baseTick = 0;
 public:
-	CScopedLocalMovement(CTFPlayer* player, bool predictionBase);
+	struct Snapshot
+	{
+		std::vector<byte> player;
+		std::array<byte, sizeof(CTFGameMovement)> movement;
+		CGlobalVarsBase clock;
+	};
+	static Snapshot Capture(CTFPlayer* player);
+	CScopedLocalMovement(CTFPlayer* player, bool predictionBase, const Snapshot* snapshot = nullptr);
 	~CScopedLocalMovement();
 	CScopedLocalMovement(const CScopedLocalMovement&) = delete;
 	CScopedLocalMovement& operator=(const CScopedLocalMovement&) = delete;

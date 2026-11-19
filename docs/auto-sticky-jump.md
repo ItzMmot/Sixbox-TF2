@@ -57,6 +57,9 @@ weapons/settings, death and timeouts cancel the sequence. Manual attack takes ov
 Auto Dodge also cancels the sequence when it takes movement control, including
 when a threat is detected during the late predicted movement check.
 
+Lead distance, low-arc pitch and half-tick corridor calculations live in
+`Features/Aimbot/Shared/StickyJumpMath.h`.
+
 ## Rendering
 
 **Sticky jump rendering** opens the arrow, filled human silhouette marker,

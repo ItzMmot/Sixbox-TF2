@@ -1281,6 +1281,19 @@ static void MiscMain()
 		FToggle(ShieldTurnRate);
 		FToggle(NoPush);
 	} EndSection();
+	if (Section("Sticky Jump Control"))
+	{
+        using namespace Vars::Misc::Movement::StickyJumpControl;
+        FToggle(Enabled);
+        PushTransparent(!Enabled.Value);
+        FKeybind(StartKey, FButtonEnum::None, {VK_LBUTTON, VK_RBUTTON, VK_SPACE});
+        FSlider(Power);
+        FDropdown(Direction);
+        FToggle(DrawStatus);
+        FToggle(DrawMarkers);
+        FNote("Press once to start; press again to cancel. Place stickies manually, then move into the launch window. Release fire/jump to start. All existing stickies may detonate. Scottish Resistance is unsupported.");
+        PopTransparent();
+	} EndSection();
 	if (Section("Auto sticky jump"))
 	{
 		using namespace Vars::Misc::Movement;
