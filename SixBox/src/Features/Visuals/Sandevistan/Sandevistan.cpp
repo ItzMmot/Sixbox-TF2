@@ -20,8 +20,13 @@ namespace
         float blend=I::RenderView->GetBlend();
         IMaterial* material=nullptr;OverrideType_t type=OVERRIDE_NORMAL;
         RenderScope(){I::RenderView->GetColorModulation(color);I::ModelRender->GetMaterialOverride(&material,&type);}
-        ~RenderScope(){I::ModelRender->ForcedMaterialOverride(material,type);I::RenderView->SetColorModulation(color);I::RenderView->SetBlend(blend);I::StudioRender->SetColorModulation(color);I::StudioRender->SetAlphaModulation(blend);}
+        ~RenderScope(){I::ModelRender->ForcedMaterialOverride(material,type);I::RenderView->SetColorModulation(color);I::RenderView->SetBlend(blend);}
     };
+    void ApplyTint(Color_t color,float opacity)
+    {
+        I::RenderView->SetColorModulation(color);
+        I::RenderView->SetBlend(std::clamp(color.a/255.f*opacity,0.f,1.f));
+    }
     bool Allowed(){return V::Enabled.Value && (V::Triggers.Value&3) && !G::Unload;}
     Color_t Color(float rank)
     {
@@ -44,15 +49,14 @@ void CSandevistan::ClearLocked()
 {
     m_events={};m_commands={};m_count=m_nextGhost=m_nextEvent=0;m_current=0;
     m_owner.Term();m_class=m_modelIndex=0;
-    m_cameraMotion={};m_echoMotion={};m_echoFrame=-1;m_nextViewDraw=0;
-    m_renderCount=0;
 }
 void CSandevistan::Reset(){std::lock_guard lock(m_mutex);ClearLocked();}
 bool CSandevistan::ValidOwner(CTFPlayer* local)
 {
     if(!local||!local->IsAlive()||local->IsAGhost()||!I::EngineClient->IsInGame()) {ClearLocked();return false;}
-    if(m_owner.Get()!=local||m_class!=local->m_iClass()||m_modelIndex!=local->m_nModelIndex())
-    {ClearLocked();m_owner=local;m_class=local->m_iClass();m_modelIndex=local->m_nModelIndex();}
+    const int playerClass=local->m_iClass(), modelIndex=local->m_nModelIndex();
+    if(m_owner.Get()!=local||m_class!=playerClass||m_modelIndex!=modelIndex)
+    {ClearLocked();m_owner=local;m_class=playerClass;m_modelIndex=modelIndex;}
     return true;
 }
 CSandevistan::Event* CSandevistan::FindEvent(uint64_t id)
@@ -109,15 +113,14 @@ void CSandevistan::CapturePrediction(CTFPlayer* local,CUserCmd* command,float /*
     auto& stored=m_commands[command->command_number%m_commands.size()];
     if(stored.number!=metadata.number||stored.event!=metadata.event||stored.consumed)return;
     stored.consumed=true;++m_diagnostics.captured;
-    pose.materialSlot=m_nextGhost;
     m_ghosts[m_nextGhost]=pose;m_nextGhost=(m_nextGhost+1)%int(m_ghosts.size());
     m_count=std::min(m_count+1,int(m_ghosts.size()));
 }
 bool CSandevistan::Latest(double now,double& born)
 {
     std::lock_guard lock(m_mutex);
-    auto* local=H::Entities.GetLocal();
-    if(!Allowed()||!ValidOwner(local))return false;
+    // Present may run on the queued material thread while the game replaces
+    // player entities. Only read captured event data here.
     born=0;
     for(const auto& event:m_events)
         if(event.confirmed&&now>=event.born&&now-event.born<std::clamp(V::Duration.Value,.15f,3.f))born=std::max(born,event.born);
@@ -133,29 +136,9 @@ void CSandevistan::InitializeMaterials()
         m_materials[style][depth]=F::Materials.create_from_vmt(name.c_str(),text);
     }
 }
-IMaterial* CSandevistan::TintMaterial(int slot,int style,bool through,Color_t color,float opacity)
-{
-    if(slot<0||slot>=Sandevistan::MaxGhosts+64) return nullptr;
-    style=std::clamp(style,0,2);
-    auto*& material=m_tinted[slot][style][through?1:0];
-    if(!material)
-    {
-        const auto name=std::format("SixBoxSandevistanTint_{}_{}_{}",slot,style,through?1:0);
-        const auto text=std::format("\"UnlitGeneric\" {{ \"$basetexture\" \"vgui/white_additive\" \"$model\" \"1\" \"$translucent\" \"1\" \"$nocull\" \"1\" \"$nofog\" \"1\" \"$ignorez\" \"{}\" \"$additive\" \"{}\" \"$wireframe\" \"{}\" }}",through?1:0,style==1?1:0,style==2?1:0);
-        material=F::Materials.create_from_vmt(name.c_str(),text);
-    }
-    if(!material||material->IsErrorMaterial()) return nullptr;
-    material->ColorModulate(color.r/255.f,color.g/255.f,color.b/255.f);
-    material->AlphaModulate(std::clamp(color.a/255.f*opacity,0.f,1.f));
-    const float white[3]={1,1,1};
-    I::RenderView->SetColorModulation(white);I::RenderView->SetBlend(1.f);
-    I::StudioRender->SetColorModulation(white);I::StudioRender->SetAlphaModulation(1.f);
-    return material;
-}
 void CSandevistan::ShutdownMaterials()
 {
     Reset();
-    for(auto& slots:m_tinted)for(auto& variants:slots)for(auto*& material:variants)if(material){F::Materials.Remove(material);material=nullptr;}
     for(auto& variants:m_materials)for(auto*& material:variants)if(material){F::Materials.Remove(material);material=nullptr;}
 }
 void CSandevistan::RenderWorld(const CViewSetup* setup)
@@ -270,9 +253,7 @@ bool CSandevistan::RenderBody(IVModelRender* render,const DrawModelState_t& stat
         draw.origin=origin;draw.angles=ghost.angles;draw.skin=ghost.skin;draw.body=ghost.body;draw.hitboxset=ghost.hitbox;
         draw.pModelToWorld=&transform;draw.pLightingOrigin=&draw.origin;setup.m_pModelToWorld=&transform;
         const auto color=Color(ghost.rank);
-        auto* tint=TintMaterial(ghost.materialSlot,V::Material.Value,V::ThroughWalls.Value,color,std::clamp(V::Opacity.Value,0.f,1.f)*TrailFade(age,ghost.rank));
-        if(!tint) continue;
-        I::ModelRender->ForcedMaterialOverride(tint);
+        ApplyTint(color,V::Opacity.Value*TrailFade(age,ghost.rank));
         original(render,setup,draw,ghost.bones.data());
         {std::lock_guard lock(m_mutex);++m_diagnostics.drawn;}
     }
@@ -333,9 +314,7 @@ void CSandevistan::RenderViewmodel(IVModelRender* render,const DrawModelState_t&
         for(int row=0;row<3;++row)transform[row][3]=info.origin[row]+offset[row];
         draw.origin+=offset;draw.pModelToWorld=&transform;setup.m_pModelToWorld=&transform;
         const auto color=Color(rank);
-        auto* tint=TintMaterial(Sandevistan::MaxGhosts+int(m_nextViewDraw)-1,V::Material.Value,false,color,std::clamp(V::ViewOpacity.Value,0.f,1.f)*TrailFade(now-born,rank));
-        if(!tint) continue;
-        I::ModelRender->ForcedMaterialOverride(tint);
+        ApplyTint(color,V::ViewOpacity.Value*TrailFade(now-born,rank));
         original(render,setup,draw,packet.bones.data());
     }
 }

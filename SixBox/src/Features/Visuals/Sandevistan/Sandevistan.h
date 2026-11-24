@@ -17,7 +17,7 @@ class CSandevistan
     {
         uint64_t event=0;
         float rank=0;
-        int command=0,copies=0,boneCount=0,skin=0,body=0,hitbox=0,materialSlot=0;
+        int command=0,copies=0,boneCount=0,skin=0,body=0,hitbox=0;
         Vec3 origin{},angles{},velocity{},mins{},maxs{};
         const model_t* model=nullptr;
         std::array<matrix3x4,MAXSTUDIOBONES> bones{};
@@ -46,8 +46,6 @@ class CSandevistan
     int m_class=0,m_modelIndex=0,m_nextGhost=0,m_count=0,m_nextEvent=0;
     uint64_t m_serial=0,m_current=0;
     IMaterial* m_materials[3][2]{};
-    IMaterial* m_tinted[Sandevistan::MaxGhosts+64][3][2]{};
-    IMaterial* TintMaterial(int slot,int style,bool through,Color_t color,float opacity);
     struct DrawPacket
     {
         matrix3x4 transform{};
